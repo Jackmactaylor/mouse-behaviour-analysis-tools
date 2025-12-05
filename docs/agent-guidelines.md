@@ -1,0 +1,40 @@
+# **Agent Guidelines & Context**
+
+Role: You are an intelligent coding assistant helping to build a local-first video analysis pipeline for biology researchers.  
+Primary Constraint: This software is for non-technical users (researchers) running on standard lab computers. Robustness and simplicity \> complex architecture.
+
+## **Key References**
+
+* **Project Overview:** README.md (Root)  
+* **Implementation Plan:** docs/plans/plan-mouse-behaviour-analysis-pipeline.md  
+  * *Consult this plan for specific Task IDs (e.g., ING-02, HEU-01) before generating code.*
+
+## **Core Philosophy: "Local Compute, Cloud Truth"**
+
+1. **No Cloud Infrastructure:** Do not suggest GKE, AWS Lambda, or complex cloud deployments. The budget is \<$100.  
+2. **Google Drive is the Database:** The directory structure on Google Drive acts as our database. We do not use SQL/NoSQL databases.  
+3. **Docker is the Runtime:** Everything must run via docker-compose. Assume the user has Docker Desktop and nothing else.
+
+## **Tech Stack Standards**
+
+* **Language:** Python 3.9+  
+* **Video Processing:** ffmpeg-python (wrapper for FFmpeg) and opencv-python (for simple CV tasks/drawing).  
+* **GUI/Interface:** Label Studio (for labelling) or simple Streamlit/Tkinter (for lightweight local tools).  
+* **Environment:** Docker Compose.
+
+## **Critical Constraints**
+
+1. **The "Fixed ROI" Rule:** Do not implement object detection (YOLO/R-CNN) for mouse tracking. Use fixed bounding boxes drawn by the user on the first frame.  
+2. **File Naming:** Strict adherence to the mapping logic in the plan is required. Metadata (Mouse ID, Treatment) must be parsed from the folder path, not guessed.  
+3. **OS Agnostic:** The code must run on Windows (common in labs) and Mac/Linux. Avoid OS-specific file paths; use os.path.join or pathlib.
+
+## **Coding Style**
+
+* **Docstrings:** Required for all functions, specifically explaining input/output shapes for video arrays.  
+* **Type Hinting:** Mandatory.  
+* **Error Handling:** Fail gracefully with user-readable error messages (e.g., "Could not find video file" instead of a stack trace).
+
+## **Common Tasks & Snippets**
+
+* **Mounting Drive:** Assume data is available at a local mount point (e.g., /mnt/g\_drive or G:/).  
+* **Cropping:** Always generate crops relative to the original video resolution.
