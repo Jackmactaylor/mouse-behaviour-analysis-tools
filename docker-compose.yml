@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: mouse-label-studio
+    ports:
+      - "8080:8080"
+    environment:
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/files
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      - LABEL_STUDIO_USERNAME=user@example.com
+      - LABEL_STUDIO_PASSWORD=password123
+    volumes:
+      - ./label-studio_data:/label-studio/data
+      - ./workspace/processed:/label-studio/files
+    restart: unless-stopped
+
+  processor:
+    build: ./docker/processor
+    container_name: mouse-processor
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./workspace:/workspace
+      - ./src:/app
+    environment:
+      - GOOGLE_DRIVE_MOUNT=/workspace/raw
+    restart: unless-stopped

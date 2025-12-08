@@ -25,6 +25,12 @@ The system relies on Google Drive as the central repository for raw videos and f
 | **ENV-02** | Google Drive Access Strategy | Determine how the script accesses the "Mice Recordings" folder. | **Recommended:** Use "Google Drive for Desktop" to mount Drive as a local G: or /Volumes/ drive. This avoids complex API OAuth flows for non-technical users. |
 | **ENV-03** | Directory Structure Standardization | Define the local workspace structure to prevent file clutter. | /workspace/raw (input) /workspace/processed (cropped) /workspace/outputs (CSVs) |
 
+> **Implementation Note (Phase 1):**
+> Due to Docker on Windows limitations with mounting virtual drives (Google Drive for Desktop), I adopted a **"Staging Area"** workflow.
+> *   **Change:** Instead of mounting `G:` directly into Docker, users copy raw files to the local `workspace/raw` folder ("The Inbox").
+> *   **Benefit:** This maintains a zero-dependency setup (no local Python/FFmpeg required) while bypassing the mount issue.
+> *   **Reference:** See `docs/plans/plan-phase-1-infrastructure.md` for details.
+
 ## **Phase 2: Ingestion & Pre-processing (ING)**
 
 **Goal:** Convert single 4-cage videos into individual, ID-tagged mouse videos.

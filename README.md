@@ -47,7 +47,31 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
    git clone \[https://github.com/your-username/mouse-behavior-analysis.git\](https://github.com/your-username/mouse-behavior-analysis.git)  
    cd mouse-behavior-analysis
 
-2. Start the environment:  
+2. Configure the environment:
+   - Create a `.env` file in the root directory (or check the default one).
+   - Set the `GOOGLE_DRIVE_PATH` to your Google Drive mount point.
+     - **Windows:** Usually `G:`
+     - **Mac:** Usually `/Volumes/GoogleDrive`
+   
+   Example `.env`:
+   ```bash
+   GOOGLE_DRIVE_PATH=G:
+   ```
+
+3. Start the environment:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. Initialize the workspace:
+   Create the required folder structure using the container:
+   ```bash
+   docker-compose exec processor python src/setup_workspace.py
+   ```
+
+5. Access the tools:
+   - **System Check & Tools:** [http://localhost:8501](http://localhost:8501)
+   - **Label Studio:** [http://localhost:8080](http://localhost:8080)
    docker-compose up \-d
 
 3. Access the tools:  

@@ -27,6 +27,7 @@ Primary Constraint: This software is for non-technical users (researchers) runni
 1. **The "Fixed ROI" Rule:** Do not implement object detection (YOLO/R-CNN) for mouse tracking. Use fixed bounding boxes drawn by the user on the first frame.  
 2. **File Naming:** Strict adherence to the mapping logic in the plan is required. Metadata (Mouse ID, Treatment) must be parsed from the folder path, not guessed.  
 3. **OS Agnostic:** The code must run on Windows (common in labs) and Mac/Linux. Avoid OS-specific file paths; use os.path.join or pathlib.
+4. **Staging Area Workflow:** Due to Docker/Windows limitations, we use a "Staging Area". Users copy files to `workspace/raw`. The pipeline reads from there, not directly from the cloud drive.
 
 ## **Coding Style**
 
@@ -36,5 +37,5 @@ Primary Constraint: This software is for non-technical users (researchers) runni
 
 ## **Common Tasks & Snippets**
 
-* **Mounting Drive:** Assume data is available at a local mount point (e.g., /mnt/g\_drive or G:/).  
+* **Data Access:** Do NOT assume direct access to host mounts (like G:/) inside Docker. Use the **Staging Area** pattern: inputs are found in `/workspace/raw` and outputs go to `/workspace/processed`.
 * **Cropping:** Always generate crops relative to the original video resolution.

@@ -1,0 +1,3 @@
+# Ignore workspace data
+workspace/
+!workspace/.gitkeep
