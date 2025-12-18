@@ -39,44 +39,48 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 ### **Prerequisites**
 
 * [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running.  
-* Access to the Lab Google Drive (mounted via Google Drive for Desktop recommended).
 
 ### **Installation**
 
 1. Clone the repository:  
-   git clone \[https://github.com/your-username/mouse-behavior-analysis.git\](https://github.com/your-username/mouse-behavior-analysis.git)  
+   git clone [https://github.com/your-username/mouse-behavior-analysis.git](https://github.com/your-username/mouse-behavior-analysis.git)  
    cd mouse-behavior-analysis
 
-2. Configure the environment:
-   - Create a `.env` file in the root directory (or check the default one).
-   - Set the `GOOGLE_DRIVE_PATH` to your Google Drive mount point.
-     - **Windows:** Usually `G:`
-     - **Mac:** Usually `/Volumes/GoogleDrive`
-   
-   Example `.env`:
-   ```bash
-   GOOGLE_DRIVE_PATH=G:
-   ```
-
-3. Start the environment:
+2. Start the environment:
    ```bash
    docker-compose up -d
    ```
 
-4. Initialize the workspace:
+3. Initialize the workspace:
    Create the required folder structure using the container:
    ```bash
    docker-compose exec processor python src/setup_workspace.py
    ```
 
-5. Access the tools:
-   - **System Check & Tools:** [http://localhost:8501](http://localhost:8501)
+4. Access the tools:
+   - **Pipeline Dashboard:** [http://localhost:8501](http://localhost:8501)
    - **Label Studio:** [http://localhost:8080](http://localhost:8080)
-   docker-compose up \-d
 
-3. Access the tools:  
-   * **Label Studio:** http://localhost:8080  
-   * **Ingestion Tool:** (Command to run script to be added)
+## **Workflow Guide**
+
+### **1. Ingestion (Crop & Process)**
+1. Copy your raw video files into the `workspace/raw` folder (The "Inbox").
+2. Open the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
+3. Go to the **Ingestion** page.
+4. Select a video, verify the metadata, and draw 4 boxes around the cages.
+5. Click **Process**. This creates 4 individual mouse videos in `workspace/processed`.
+
+### **2. Push to Label Studio**
+1. Go to the **Labelling Queue** page in the Dashboard.
+2. You will see a list of all processed videos. Select the ones you want to label.
+3. Click **Upload Selected Tasks**.
+   - *Note:* The system automatically authenticates with Label Studio using the configured environment credentials. No manual API token is required.
+
+### **3. Labelling**
+1. Open Label Studio.
+2. Enter the **Mouse Behavior Analysis** project.
+3. Click **Label All Tasks**.
+4. Use the hotkeys (see `docs/labelling_guide.md`) to mark events.
 
 ## **Project Structure**
 

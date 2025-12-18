@@ -4,6 +4,7 @@ import os
 import sys
 import cv2
 import glob
+import json
 
 # Add current directory to path to ensure imports work
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,8 +13,10 @@ if current_dir not in sys.path:
 
 try:
     from utils.metadata import parse_video_path, load_group_map
-    from utils.video_processor import crop_video
+    from utils.video_processor import crop_video, get_video_fps
     from components.roi_selector import render_roi_selector
+    from utils.label_studio import LabelStudioClient
+    from components.label_studio_config import LABEL_STUDIO_CONFIG, PROJECT_TITLE
 except ImportError as e:
     st.error(f"Import Error: {e}. Please ensure you are running from the correct directory.")
 
@@ -22,7 +25,7 @@ st.set_page_config(page_title="Mouse Behavior Analysis", page_icon="🐭", layou
 st.title("🐭 Mouse Behavior Analysis Pipeline")
 
 st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Ingestion", "System Check", "Processing (Coming Soon)"])
+page = st.sidebar.radio("Go to", ["Ingestion", "Labelling Queue", "System Check"])
 
 # --- INGESTION PAGE ---
 if page == "Ingestion":
@@ -180,9 +183,153 @@ if page == "Ingestion":
         for f in st.session_state.processed_files:
             st.code(os.path.basename(f))
         
+        st.info("👉 Go to the 'Labelling Queue' page to push these videos to Label Studio.")
+
         if st.button("Process Another Video"):
             st.session_state.processed_files = []
             st.rerun()
+
+# --- LABELLING QUEUE PAGE ---
+elif page == "Labelling Queue":
+    st.header("Labelling Queue")
+    st.markdown("Manage processed videos and push them to Label Studio.")
+    
+    processed_dir = "/workspace/processed"
+    
+    # 1. Scan for Processed Videos (JSON sidecars)
+    found_videos = []
+    if os.path.exists(processed_dir):
+        for root, dirs, files in os.walk(processed_dir):
+            for file in files:
+                if file.endswith(".json"):
+                    json_path = os.path.join(root, file)
+                    try:
+                        with open(json_path, 'r') as f:
+                            meta = json.load(f)
+                            # Verify the video file exists
+                            video_filename = meta.get("processed_file")
+                            if video_filename:
+                                video_path = os.path.join(root, video_filename)
+                                if os.path.exists(video_path):
+                                    found_videos.append({
+                                        "path": video_path,
+                                        "meta": meta,
+                                        "rel_path": os.path.relpath(video_path, processed_dir)
+                                    })
+                    except Exception as e:
+                        st.warning(f"Error reading {file}: {e}")
+    
+    if not found_videos:
+        st.info("No processed videos found. Go to 'Ingestion' to process raw videos.")
+    else:
+        st.write(f"Found {len(found_videos)} processed videos.")
+        
+        # 2. Selection Table
+        # Create a dataframe-like structure for display
+        import pandas as pd
+        
+        data = []
+        for v in found_videos:
+            m = v["meta"]
+            data.append({
+                "Select": False,
+                "Mouse ID": m.get("mouse_id"),
+                "Date": m.get("date"),
+                "Treatment": m.get("treatment"),
+                "Group": m.get("group"),
+                "File": m.get("processed_file")
+            })
+            
+        df = pd.DataFrame(data)
+        
+        # Use Streamlit's data editor for selection (requires Streamlit 1.23+)
+        # Since we are on 1.29, this is perfect.
+        edited_df = st.data_editor(
+            df,
+            column_config={
+                "Select": st.column_config.CheckboxColumn(
+                    "Select",
+                    help="Select to upload",
+                    default=False,
+                )
+            },
+            disabled=["Mouse ID", "Date", "Treatment", "Group", "File"],
+            hide_index=True,
+        )
+        
+        # Get selected rows
+        selected_rows = edited_df[edited_df.Select]
+        
+        st.divider()
+        
+        # 3. Push to Label Studio
+        st.subheader("Push to Label Studio")
+        
+        st.info("Authentication is handled automatically via system credentials.")
+
+        if not selected_rows.empty:
+            st.write(f"Selected {len(selected_rows)} videos for upload.")
+            
+            if st.button("🚀 Upload Selected Tasks"):
+                try:
+                    # Initialize client with env vars (username/password)
+                    ls_client = LabelStudioClient(
+                        username=os.getenv("LABEL_STUDIO_USERNAME"),
+                        password=os.getenv("LABEL_STUDIO_PASSWORD")
+                    )
+                    
+                    is_connected, error_msg = ls_client.check_connection()
+                    
+                    if is_connected:
+                        project_id = ls_client.get_or_create_project(PROJECT_TITLE, LABEL_STUDIO_CONFIG)
+                        
+                        # Ensure Local Storage is configured
+                        # We use /label-studio/files as the storage path because DOCUMENT_ROOT is /
+                        ls_client.create_local_storage(project_id, "/label-studio/files")
+                        
+                        tasks = []
+                        # Match selected rows back to found_videos
+                        # We can use the 'File' column (filename) as a key, assuming uniqueness within the list
+                        # Or better, iterate through found_videos and check if they are in selected_rows
+                        
+                        selected_filenames = selected_rows["File"].tolist()
+                        
+                        for v in found_videos:
+                            if v["meta"].get("processed_file") in selected_filenames:
+                                # Construct Task
+                                rel_path = v["rel_path"].replace(os.sep, '/')
+                                # Use path relative to DOCUMENT_ROOT (which is /)
+                                # So we prepend label-studio/files/
+                                video_url = f"/data/local-files/?d=label-studio/files/{rel_path}"
+                                
+                                # Calculate FPS
+                                fps = get_video_fps(v["path"])
+                                if fps == 0:
+                                    st.warning(f"Could not detect FPS for {v['meta'].get('processed_file')}. Defaulting to 60.0.")
+                                    fps = 60.0 # Default fallback
+                                
+                                task = {
+                                    "video": video_url,
+                                    "fps": fps,
+                                    "meta": v["meta"]
+                                }
+                                tasks.append(task)
+                                print(f"DEBUG: Task payload: {task}") # Log to console
+                        
+                        if tasks:
+                            ls_client.import_tasks(project_id, tasks)
+                            st.success(f"Successfully imported {len(tasks)} tasks to Project #{project_id}!")
+                            st.markdown(f"[Open Label Studio](http://localhost:8080/projects/{project_id})")
+                        else:
+                            st.warning("No tasks generated. Something went wrong with matching selections.")
+                            
+                    else:
+                        st.error(f"Could not connect to Label Studio: {error_msg}")
+                        
+                except Exception as e:
+                    st.error(f"Upload failed: {e}")
+        else:
+            st.info("Select videos in the table above to enable upload.")
 
 # --- SYSTEM CHECK PAGE ---
 elif page == "System Check":

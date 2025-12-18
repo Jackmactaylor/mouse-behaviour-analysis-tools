@@ -22,7 +22,7 @@ The system relies on Google Drive as the central repository for raw videos and f
 | ID | Task Name | Description | Technical Implementation |
 | :---- | :---- | :---- | :---- |
 | **ENV-01** | Docker Compose Configuration | Create docker-compose.yml to spin up the Labelling UI and the Python processing container. | Service 1: label-studio (Port 8080\) Service 2: processor (Python \+ FFmpeg) |
-| **ENV-02** | Google Drive Access Strategy | Determine how the script accesses the "Mice Recordings" folder. | **Recommended:** Use "Google Drive for Desktop" to mount Drive as a local G: or /Volumes/ drive. This avoids complex API OAuth flows for non-technical users. |
+| **ENV-02** | Google Drive Access Strategy | **(DEPRECATED)** Determine how the script accesses the "Mice Recordings" folder. | **Replaced by Staging Area:** Users manually copy files to `workspace/raw`. Direct mount proved unreliable on Windows Docker. |
 | **ENV-03** | Directory Structure Standardization | Define the local workspace structure to prevent file clutter. | /workspace/raw (input) /workspace/processed (cropped) /workspace/outputs (CSVs) |
 
 > **Implementation Note (Phase 1):**
