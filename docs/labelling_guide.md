@@ -22,14 +22,11 @@ We use **Time Segments** to track behavior. This allows us to capture the *durat
 
 ### **Workflow**
 
-1.  **Play the video** (Spacebar).
-2.  When you see a behavior start (e.g., Rubbing):
-    *   **Press the Hotkey** (e.g., `1` for Rubbing).
-    *   A colored region will start appearing on the timeline.
-3.  When the behavior stops:
-    *   **Press the Hotkey again** (e.g., `1`).
-    *   The region stops recording.
-    *   *Tip:* You can drag the ends of the region in the timeline to adjust the start/end times precisely if you missed the exact moment.
+1.  **Play the video** (Spacebar) to scan for behaviors.
+2.  **Pause** when you identify a behavior event.
+3.  **Select the Label**: Press the Hotkey (e.g., `1`) or click the label name to activate it.
+4.  **Create Region**: Click and drag on the audio timeline (bottom bar) to mark the duration of the event.
+    *   *Tip:* You can adjust the start and end points of the region by dragging the handles after creation.
 
 ### **Hotkeys**
 

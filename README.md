@@ -22,7 +22,7 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 * **Fixed ROI Cropping:** Automatically splits a single 4-cage video into 4 individual, stabilized mouse videos using a "draw once, crop all" interface.  
 * **Automated Metadata:** Parses the directory structure to automatically tag videos with the correct Mouse ID, Treatment Group, and Date, eliminating lookup errors.  
 * **Motion Heuristics:** (Planned) Pre-scans videos to identify periods of inactivity, allowing researchers to skip hours of footage where the mouse is sleeping.  
-* **Label Studio Integration:** Uses a containerized instance of [Label Studio](https://labelstud.io/) for a robust, keyboard-driven labelling interface that captures precise start/stop durations.
+* **Label Studio Integration:** Uses a containerized instance of [Label Studio](https://labelstud.io/) for a robust labelling interface that captures precise start/stop durations via timeline segmentation.
 
 ## **Architecture**
 
@@ -80,7 +80,7 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 1. Open Label Studio.
 2. Enter the **Mouse Behavior Analysis** project.
 3. Click **Label All Tasks**.
-4. Use the hotkeys (see `docs/labelling_guide.md`) to mark events.
+4. Use the timeline interface (see `docs/labelling_guide.md`) to mark events.
 
 ## **Project Structure**
 
