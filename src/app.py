@@ -417,6 +417,11 @@ elif page == "Data Export":
                              try:
                                  # 2. Export JSON
                                  export_data = ls_client.export_snapshot(selected_project_id, export_type='JSON')
+
+                                 # Debug: Show what we got
+                                 with st.expander("Debug: Raw Export Data (First Task)"):
+                                     if export_data and len(export_data) > 0:
+                                         st.json(export_data[0])
                                  
                                  # 3. Process to CSV
                                  timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

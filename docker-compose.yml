@@ -24,9 +24,10 @@ services:
       - LABEL_STUDIO_USERNAME=user@example.com
       - LABEL_STUDIO_PASSWORD=password123
       # Set this to your Tailscale IP (e.g., http://100.x.y.z:8080) for remote access
-      - LABEL_STUDIO_PUBLIC_URL=http://localhost:8080
+      - LABEL_STUDIO_PUBLIC_URL=http://100.112.38.12:8080
     volumes:
       - ./workspace:/workspace
       - ./src:/app
       - ./label-studio_data:/label-studio-data:ro
+    command: streamlit run app.py --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
     restart: unless-stopped

@@ -3,6 +3,7 @@ import json
 import os
 import logging
 from datetime import datetime
+from utils.metadata import load_group_map
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,10 +22,27 @@ def process_export_to_csv(export_data, output_path):
     """
     records = []
     
-    for task in export_data:
+    # Pre-compute MouseID -> Group lookup
+    try:
+        group_map = load_group_map()
+        mouse_to_group_lookup = {}
+        for g_name, g_info in group_map.items():
+            for m_id in g_info.get('cages', []):
+                if m_id and str(m_id).lower() != 'unknown':
+                    mouse_to_group_lookup[str(m_id)] = g_name
+    except Exception as e:
+        logger.warning(f"Could not load group map for fallback lookup: {e}")
+        mouse_to_group_lookup = {}
+    
+    for i, task in enumerate(export_data):
         # Get metadata from task data
         task_data = task.get('data', {})
         video_path = task_data.get('video', '')
+
+        # DEBUG: Log the first task's structure to help diagnose missing fields
+        if i == 0:
+            logger.info(f"DEBUG - First Task Data Keys: {list(task_data.keys())}")
+            logger.info(f"DEBUG - First Task Meta: {task_data.get('meta')}")
         
         # Try to get metadata from 'meta' field if it exists, otherwise parse filename?
         # Assuming the pipeline puts metadata in the 'meta' field during import.
@@ -43,6 +61,7 @@ def process_export_to_csv(export_data, output_path):
         mouse_id = task_data.get('mouse_id', meta.get('mouse_id', 'Unknown'))
         date_str = task_data.get('date', meta.get('date', 'Unknown'))
         treatment = task_data.get('treatment', meta.get('treatment', 'Unknown'))
+        group = task_data.get('group', meta.get('group', 'Unknown'))
         
         # If 'Unknown', try to parse from filename as a fallback
         if mouse_id == 'Unknown' and video_path:
@@ -56,6 +75,10 @@ def process_export_to_csv(export_data, output_path):
             if len(parts) >= 3:
                 treatment = parts[2]
 
+        # Final Fallback: Look up Group from Mouse ID provided
+        if group == 'Unknown' and mouse_id != 'Unknown':
+            group = mouse_to_group_lookup.get(str(mouse_id), 'Unknown')
+            
         for annotation in task.get('annotations', []):
             # We only care about the final ground truth, usually the most recent one or 
             # simply all attached predictions/annotations. 
@@ -75,6 +98,7 @@ def process_export_to_csv(export_data, output_path):
                     for label in labels:
                         records.append({
                             'MouseID': mouse_id,
+                            'Group': group,
                             'Date': date_str,
                             'Treatment': treatment,
                             'Behavior': label,
@@ -93,7 +117,7 @@ def process_export_to_csv(export_data, output_path):
     df = pd.DataFrame(records)
     
     # Sort for cleanliness
-    df = df.sort_values(by=['Date', 'MouseID', 'Rub_Start_Time'])
+    df = df.sort_values(by=['Group', 'Date', 'MouseID', 'Rub_Start_Time'])
     
     # Ensure directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
