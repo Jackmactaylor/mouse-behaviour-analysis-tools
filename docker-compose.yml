@@ -23,6 +23,8 @@ services:
     environment:
       - LABEL_STUDIO_USERNAME=user@example.com
       - LABEL_STUDIO_PASSWORD=password123
+      # Set this to your Tailscale IP (e.g., http://100.x.y.z:8080) for remote access
+      - LABEL_STUDIO_PUBLIC_URL=http://localhost:8080
     volumes:
       - ./workspace:/workspace
       - ./src:/app

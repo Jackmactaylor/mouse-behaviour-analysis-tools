@@ -4,6 +4,17 @@ import sys
 import re
 import json
 import subprocess
+import concurrent.futures
+import threading
+try:
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+except ImportError:
+    try:
+        from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    except ImportError:
+        add_script_run_ctx = None
+        get_script_run_ctx = None
+
 from typing import List, Dict, Callable, Optional
 
 def get_video_duration(input_path: str) -> float:
@@ -76,101 +87,164 @@ def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Di
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
 
+def _process_single_roi(
+    roi_index: int,
+    total_rois: int,
+    input_path: str,
+    roi: tuple,
+    output_path: str,
+    mouse_id: str,
+    date: str,
+    treatment: str,
+    group: str,
+    has_audio: bool,
+    total_duration: float,
+    progress_dict: Dict[int, float],
+    progress_callback: Optional[Callable[[float, str], None]],
+    script_run_ctx: Optional[object] = None
+) -> str:
+    """Helper function to process a single ROI in a thread."""
+    if add_script_run_ctx and script_run_ctx:
+        add_script_run_ctx(threading.current_thread(), script_run_ctx)
+        
+    try:
+        x, y, w, h = roi
+        
+        # Determine safest fast settings for CPU since GPU passthrough is complex
+        output_kwargs = {
+            'vcodec': 'libx264', 
+            'acodec': 'aac', 
+            'preset': 'veryfast',  # Faster encoding
+            'crf': 23,
+            'threads': 4 # Allow each process to use 4 threads (16 total on 24 core CPU)
+        }
+
+        input_stream = ffmpeg.input(input_path)
+        video_stream = input_stream.filter('crop', w, h, x, y)
+
+        if has_audio:
+            audio_stream = input_stream.audio
+            stream = ffmpeg.output(video_stream, audio_stream, output_path, **output_kwargs)
+        else:
+            audio_stream = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=44100', format='lavfi')
+            output_kwargs['shortest'] = None
+            stream = ffmpeg.output(video_stream, audio_stream, output_path, **output_kwargs)
+
+        stream = stream.overwrite_output()
+        args = ffmpeg.get_args(stream)
+        cmd = ['ffmpeg'] + args
+        
+        # Run process
+        process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
+        
+        # Monitor progress
+        for line in process.stderr:
+            if total_duration > 0:
+                time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line)
+                if time_match:
+                    hours, minutes, seconds = map(float, time_match.groups())
+                    current_time = hours * 3600 + minutes * 60 + seconds
+                    roi_progress = min(current_time / total_duration, 1.0)
+                    
+                    # Update shared dict
+                    progress_dict[roi_index] = roi_progress
+                    
+                    # Compute global progress
+                    if progress_callback:
+                        avg_progress = sum(progress_dict.values()) / total_rois
+                        progress_callback(avg_progress, f"Parallel Processing: {int(avg_progress*100)}%")
+
+        process.wait()
+
+        if process.returncode == 0:
+            # Create JSON sidecar
+            filename = os.path.basename(output_path)
+            sidecar_path = output_path.replace('.mp4', '.json')
+            sidecar_data = {
+                "original_file": input_path,
+                "mouse_id": mouse_id,
+                "date": date,
+                "treatment": treatment,
+                "group": group,
+                "roi": roi,
+                "processed_file": filename
+            }
+            with open(sidecar_path, 'w') as f:
+                json.dump(sidecar_data, f, indent=2)
+            return output_path
+        else:
+            print(f"FFmpeg failed for ROI {roi_index}")
+            return None
+
+    except Exception as e:
+        print(f"Error processing ROI {roi_index}: {e}")
+        return None
+
+def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Dict, progress_callback: Optional[Callable[[float, str], None]] = None) -> List[str]:
+    """
+    Crops a video into 4 separate files based on ROIs using parallel processing.
+    """
+    generated_files = []
+    
+    mouse_ids = metadata.get("mouse_ids", ["Unknown"] * 4)
+    date = metadata.get("date", "UnknownDate")
+    treatment = metadata.get("treatment", "UnknownTreatment")
+    group = metadata.get("group", "UnknownGroup")
+    
+    total_duration = get_video_duration(input_path)
+
+    # Sanitize metadata for paths
+    safe_date = "".join(c for c in date if c.isalnum() or c in ('-', '_'))
+    safe_treatment = "".join(c for c in treatment if c.isalnum() or c in ('-', '_'))
+    safe_group = "".join(c for c in group if c.isalnum() or c in ('-', '_'))
+
+    # Create structured output directory: output_dir / date / group_treatment
+    sub_dir_name = f"{safe_group}_{safe_treatment}"
+    target_dir = os.path.join(output_dir, safe_date, sub_dir_name)
+    
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+
     # Check for audio once
     has_audio = has_audio_stream(input_path)
 
-    for i, roi in enumerate(rois):
-        if i >= len(mouse_ids):
-            mouse_id = f"Mouse{i+1}"
-        else:
-            mouse_id = mouse_ids[i]
-
-        x, y, w, h = roi
-        
-        safe_mouse_id = "".join(c for c in mouse_id if c.isalnum() or c in ('-', '_'))
-        
-        filename = f"{safe_mouse_id}_{safe_date}_{safe_treatment}.mp4"
-        output_path = os.path.join(target_dir, filename)
-        
-        msg = f"Processing ROI {i+1}/{len(rois)}: {filename}"
-        print(msg)
-        sys.stdout.flush()
-        
-        if progress_callback:
-            # Base progress for this ROI (e.g. 0.0, 0.25, 0.5, 0.75)
-            base_progress = i / len(rois)
-            progress_callback(base_progress, msg)
-        
+    # Capture streamlit context
+    script_run_ctx = None
+    if get_script_run_ctx:
         try:
-            # Build FFmpeg command manually to read stderr line-by-line
-            input_stream = ffmpeg.input(input_path)
-            video_stream = input_stream.filter('crop', w, h, x, y)
-            
-            output_kwargs = {
-                'vcodec': 'libx264', 
-                'acodec': 'aac', 
-                'preset': 'fast', 
-                'crf': 23
-            }
-
-            if has_audio:
-                # Map existing audio
-                audio_stream = input_stream.audio
-                stream = ffmpeg.output(video_stream, audio_stream, output_path, **output_kwargs)
+            script_run_ctx = get_script_run_ctx()
+        except:
+            pass
+    
+    # Shared progress dictionary for threads
+    progress_dict = {i: 0.0 for i in range(len(rois))}
+    
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(rois)) as executor:
+        for i, roi in enumerate(rois):
+            if i >= len(mouse_ids):
+                mouse_id = f"Mouse{i+1}"
             else:
-                # Generate silent audio to satisfy Label Studio's timeline requirement
-                audio_stream = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=44100', format='lavfi')
-                # Use shortest=None to add -shortest flag, ensuring audio stops with video
-                output_kwargs['shortest'] = None
-                stream = ffmpeg.output(video_stream, audio_stream, output_path, **output_kwargs)
-
-            stream = stream.overwrite_output()
+                mouse_id = mouse_ids[i]
             
-            args = ffmpeg.get_args(stream)
-            cmd = ['ffmpeg'] + args
+            safe_mouse_id = "".join(c for c in mouse_id if c.isalnum() or c in ('-', '_'))
+            filename = f"{safe_mouse_id}_{safe_date}_{safe_treatment}.mp4"
+            output_path = os.path.join(target_dir, filename)
             
-            process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
+            future = executor.submit(
+                _process_single_roi,
+                i, len(rois), input_path, roi, output_path,
+                mouse_id, date, treatment, group,
+                has_audio, total_duration,
+                progress_dict, progress_callback,
+                script_run_ctx
+            )
+            futures.append(future)
             
-            # Read stderr for progress
-            for line in process.stderr:
-                if progress_callback and total_duration > 0:
-                    # Look for time=00:00:00.00
-                    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line)
-                    if time_match:
-                        hours, minutes, seconds = map(float, time_match.groups())
-                        current_time = hours * 3600 + minutes * 60 + seconds
-                        # Calculate progress for this specific ROI (0.0 to 1.0)
-                        roi_progress = min(current_time / total_duration, 1.0)
-                        # Map to total progress (e.g. if ROI 1 is 50% done, total is 12.5%)
-                        total_progress = base_progress + (roi_progress / len(rois))
-                        progress_callback(total_progress, msg)
+        # Collect results
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                generated_files.append(result)
             
-            process.wait()
-            
-            if process.returncode == 0:
-                generated_files.append(output_path)
-                
-                # Create JSON sidecar
-                sidecar_path = output_path.replace('.mp4', '.json')
-                sidecar_data = {
-                    "original_file": input_path,
-                    "mouse_id": mouse_id,
-                    "date": date,
-                    "treatment": treatment,
-                    "group": group,
-                    "roi": roi,
-                    "processed_file": filename
-                }
-                with open(sidecar_path, 'w') as f:
-                    json.dump(sidecar_data, f, indent=2)
-            else:
-                print(f"FFmpeg failed for ROI {i}")
-                
-        except Exception as e:
-            error_msg = f"Error processing ROI {i}: {e}"
-            print(error_msg)
-            sys.stdout.flush()
-            if progress_callback:
-                progress_callback(base_progress, f"❌ {error_msg}")
-            
-    return generated_files
+    return sorted(generated_files)

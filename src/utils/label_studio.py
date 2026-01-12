@@ -9,21 +9,52 @@ import urllib.parse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_local_api_key(db_path='/label-studio-data/label_studio.sqlite3'):
+def get_local_api_key(db_path=None):
     """
     Retrieve the API key directly from the Label Studio SQLite database.
-    This is useful when running in the same Docker stack.
+    This is useful when running in the same Docker stack or local env.
     """
-    if not os.path.exists(db_path):
-        logger.warning(f"Label Studio DB not found at {db_path}")
+    paths_to_check = []
+    
+    if db_path:
+        paths_to_check.append(db_path)
+    else:
+        # 1. Docker default path
+        paths_to_check.append('/label-studio-data/label_studio.sqlite3')
+        
+        # 2. Local development path (relative to this file)
+        # e:\GitHub\mouse-behaviour-tools\src\utils\label_studio.py -> e:\GitHub\mouse-behaviour-tools\
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+        
+        local_db = os.path.join(project_root, 'label-studio_data', 'label_studio.sqlite3')
+        paths_to_check.append(local_db)
+
+    found_path = None
+    for p in paths_to_check:
+        if os.path.exists(p):
+            found_path = p
+            break
+            
+    if not found_path:
+        logger.warning(f"Label Studio DB not found. Checked: {paths_to_check}")
         return None
     
     try:
-        # Open in read-only mode if possible, but sqlite3.connect doesn't strictly enforce it like 'file:...?mode=ro' without uri=True
-        # We rely on the docker mount being ro
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        # Open in read-only mode using URI
+        msg = f"Reading API key from {found_path}"
+        logger.info(msg)
+        
+        # Windows path handling for URI
+        if os.name == 'nt':
+            # sqlite URI requires forward slashes and possibly drive letter handling
+            # simpler to just connect normally on windows dev if not locked
+            conn = sqlite3.connect(found_path)
+        else:
+            conn = sqlite3.connect(f"file:{found_path}?mode=ro", uri=True)
+            
         cursor = conn.cursor()
-        # Get the first token found. In a single-user setup, this is usually correct.
+        # Get the first token found.
         cursor.execute("SELECT key FROM authtoken_token ORDER BY created DESC LIMIT 1")
         result = cursor.fetchone()
         conn.close()
@@ -57,6 +88,12 @@ class LabelStudioClient:
             self.url = os.getenv("LABEL_STUDIO_URL", "http://label-studio:8080")
         else:
             self.url = url.rstrip('/')
+
+        # Automatic API Key Detection
+        if not self.api_key and not (self.username and self.password):
+            self.api_key = get_local_api_key()
+            if self.api_key:
+                logger.info("Automatically initialized Label Studio client with found API key.")
             
         if self.api_key:
             self.headers = {
@@ -371,3 +408,30 @@ class LabelStudioClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to create annotation: {e}")
             raise
+
+    def export_snapshot(self, project_id, export_type='JSON'):
+        """
+        Export a snapshot of the project data.
+        
+        Args:
+            project_id (int): The ID of the project.
+            export_type (str): The format to export (JSON, CSV, TSV, etc.).
+            
+        Returns:
+            list/dict: The exported data structure (if JSON), or raw content.
+        """
+        try:
+            url = f"{self.url}/api/projects/{project_id}/export"
+            params = {"exportType": export_type}
+            
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            
+            if export_type == 'JSON':
+                return response.json()
+            else:
+                return response.content
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to export project: {e}")
+            raise
+

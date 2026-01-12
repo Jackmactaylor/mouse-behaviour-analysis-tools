@@ -5,6 +5,8 @@ import sys
 import cv2
 import glob
 import json
+import pandas as pd
+from datetime import datetime
 
 # Add current directory to path to ensure imports work
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +18,7 @@ try:
     from utils.video_processor import crop_video, get_video_fps, get_video_duration
     from components.roi_selector import render_roi_selector
     from utils.label_studio import LabelStudioClient
+    from utils.data_exporter import process_export_to_csv
     from components.label_studio_config import LABEL_STUDIO_CONFIG, PROJECT_TITLE
     from utils.motion import detect_motion, generate_segments
 except ImportError as e:
@@ -25,8 +28,10 @@ st.set_page_config(page_title="Mouse Behavior Analysis", page_icon="🐭", layou
 
 st.title("🐭 Mouse Behavior Analysis Pipeline")
 
+st.label_studio_url = os.getenv("LABEL_STUDIO_URL", "http://label-studio:8080")
+
 st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Ingestion", "Labelling Queue", "System Check"])
+page = st.sidebar.radio("Go to", ["Ingestion", "Labelling Queue", "Data Export", "System Check"])
 
 # --- INGESTION PAGE ---
 if page == "Ingestion":
@@ -364,7 +369,10 @@ elif page == "Labelling Queue":
                         
                         if uploaded_count > 0:
                             st.success(f"Successfully imported {uploaded_count} tasks to Project #{project_id}!")
-                            st.markdown(f"[Open Label Studio](http://localhost:8080/projects/{project_id})")
+                            
+                            # Get public URL for Label Studio (useful for remote access via Tailscale)
+                            ls_public_url = os.getenv("LABEL_STUDIO_PUBLIC_URL", "http://localhost:8080").rstrip('/')
+                            st.markdown(f"[Open Label Studio]({ls_public_url}/projects/{project_id})")
                         else:
                             st.warning("No tasks generated. Something went wrong with matching selections.")
                             
@@ -375,6 +383,69 @@ elif page == "Labelling Queue":
                     st.error(f"Upload failed: {e}")
         else:
             st.info("Select videos in the table above to enable upload.")
+
+# --- DATA EXPORT PAGE ---
+elif page == "Data Export":
+    st.header("Data Synchronization (Export)")
+    st.markdown("Export labelled data from Label Studio and convert it to analyzable CSV format.")
+    
+    # Initialize LS Client
+    ls_client = LabelStudioClient()
+    connected, error = ls_client.check_connection()
+    
+    if not connected:
+        st.error(f"Could not connect to Label Studio: {error}")
+    else:
+        st.success("Connected to Label Studio")
+        
+        try:
+             # Just getting list of projects
+             response = ls_client.session.get(f"{ls_client.url}/api/projects")
+             if response.status_code == 200:
+                 projects = response.json().get('results', [])
+                 if projects:
+                     project_options = {p['id']: f"{p['title']} (ID: {p['id']})" for p in projects}
+                     
+                     selected_project_id = st.selectbox("Select Project to Export", 
+                                                      options=list(project_options.keys()),
+                                                      format_func=lambda x: project_options[x])
+                     
+                     st.info(f"Ready to export data from Project ID: {selected_project_id}")
+                     
+                     if st.button("Export Data"):
+                         with st.spinner("Downloading and processing export..."):
+                             try:
+                                 # 2. Export JSON
+                                 export_data = ls_client.export_snapshot(selected_project_id, export_type='JSON')
+                                 
+                                 # 3. Process to CSV
+                                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                                 output_filename = f"mouse_behavior_export_{timestamp}.csv"
+                                 output_path = os.path.join("/workspace/outputs", output_filename)
+                                 
+                                 saved_path = process_export_to_csv(export_data, output_path)
+                                 
+                                 if saved_path:
+                                     st.success(f"Export complete!")
+                                     st.markdown(f"**Saved to:** `{saved_path}`")
+                                     
+                                     # Optional: DataFrame Preview
+                                     if os.path.exists(saved_path):
+                                         df = pd.read_csv(saved_path)
+                                         st.dataframe(df.head())
+                                 else:
+                                     st.warning("Export completed but no labeled data was found to save.")
+                                     
+                             except Exception as e:
+                                 st.error(f"Export failed: {e}")
+                                 
+                 else:
+                     st.warning("No projects found in Label Studio.")
+             else:
+                 st.error("Failed to list projects.")
+                 
+        except Exception as e:
+            st.error(f"Error accessing projects: {e}")
 
 # --- SYSTEM CHECK PAGE ---
 elif page == "System Check":
