@@ -25,8 +25,23 @@ def inspect_tasks():
     if not connected:
         return
     
-    # We know the project ID is 7 from previous steps
-    project_id = 7
+    # Find project by title
+    project_id = None
+    try:
+        p_resp = client.session.get(f"{client.url}/api/projects")
+        p_resp.raise_for_status()
+        projects = p_resp.json().get('results', [])
+        for p in projects:
+            if p['title'] == "Mouse Behavior Analysis":
+                project_id = p['id']
+                break
+    except Exception as e:
+        print(f"Error listing projects: {e}")
+        return
+
+    if not project_id:
+        print("Project 'Mouse Behavior Analysis' not found.")
+        return
     
     print(f"Inspecting tasks for Project {project_id}...")
     
@@ -67,8 +82,10 @@ def inspect_tasks():
         if len(tasks) > 0:
             print("\nSample Task Data:")
             for i, task in enumerate(tasks):
-                if i >= 5: break
-                print(f"Task Index {i}: ID={task.get('id')}, Data={json.dumps(task.get('data'))}")
+                if i >= 1: break
+                print(f"Task Index {i}: ID={task.get('id')}")
+                print(f"Annotations: {json.dumps(task.get('annotations'), indent=2)}")
+                print(f"Predictions: {json.dumps(task.get('predictions'), indent=2)}")
                 
             # Check for duplicate IDs
             ids = [t.get('id') for t in tasks]

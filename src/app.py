@@ -13,10 +13,11 @@ if current_dir not in sys.path:
 
 try:
     from utils.metadata import parse_video_path, load_group_map
-    from utils.video_processor import crop_video, get_video_fps
+    from utils.video_processor import crop_video, get_video_fps, get_video_duration
     from components.roi_selector import render_roi_selector
     from utils.label_studio import LabelStudioClient
     from components.label_studio_config import LABEL_STUDIO_CONFIG, PROJECT_TITLE
+    from utils.motion import detect_motion, generate_segments
 except ImportError as e:
     st.error(f"Import Error: {e}. Please ensure you are running from the correct directory.")
 
@@ -267,6 +268,16 @@ elif page == "Labelling Queue":
         
         st.info("Authentication is handled automatically via system credentials.")
 
+        # Motion Detection Options
+        use_motion_detection = st.checkbox("Run Motion Detection (Skip Inactive Periods)", value=True, help="Analyzes video to find active segments and uploads them as pre-annotations.")
+        
+        if use_motion_detection:
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                motion_threshold = st.slider("Motion Threshold", 100, 2000, 500, help="Higher = Less sensitive (ignores small movements)")
+            with col_m2:
+                min_duration = st.slider("Min Duration (s)", 0.5, 5.0, 1.0, help="Ignore movements shorter than this")
+
         if not selected_rows.empty:
             st.write(f"Selected {len(selected_rows)} videos for upload.")
             
@@ -294,31 +305,65 @@ elif page == "Labelling Queue":
                         
                         selected_filenames = selected_rows["File"].tolist()
                         
-                        for v in found_videos:
+                        # Progress bar for motion detection
+                        progress_bar = st.progress(0.0)
+                        status_text = st.empty()
+                        
+                        uploaded_count = 0
+                        
+                        for i, v in enumerate(found_videos):
                             if v["meta"].get("processed_file") in selected_filenames:
+                                status_text.text(f"Processing {v['meta'].get('processed_file')}...")
+                                
                                 # Construct Task
                                 rel_path = v["rel_path"].replace(os.sep, '/')
-                                # Use path relative to DOCUMENT_ROOT (which is /)
-                                # So we prepend label-studio/files/
                                 video_url = f"/data/local-files/?d=label-studio/files/{rel_path}"
                                 
-                                # Calculate FPS
                                 fps = get_video_fps(v["path"])
-                                if fps == 0:
-                                    st.warning(f"Could not detect FPS for {v['meta'].get('processed_file')}. Defaulting to 60.0.")
-                                    fps = 60.0 # Default fallback
+                                duration = get_video_duration(v["path"])
+                                if fps == 0: fps = 60.0
                                 
-                                task = {
+                                task_data = {
                                     "video": video_url,
                                     "fps": fps,
-                                    "meta": v["meta"]
+                                    "meta": v["meta"],
+                                    "filename": v["meta"].get("processed_file"),
+                                    "mouse_id": v["meta"].get("mouse_id")
                                 }
-                                tasks.append(task)
-                                print(f"DEBUG: Task payload: {task}") # Log to console
+                                
+                                # 1. Create Task
+                                task_id = ls_client.create_task(project_id, task_data)
+                                
+                                if task_id:
+                                    uploaded_count += 1
+                                    
+                                    # 2. Run Motion Detection & Upload Annotation
+                                    if use_motion_detection:
+                                        status_text.text(f"Scanning for motion: {v['meta'].get('processed_file')}...")
+                                        try:
+                                            motion_scores = detect_motion(v["path"])
+                                            segments = generate_segments(motion_scores, threshold=motion_threshold, min_duration=min_duration)
+                                            
+                                            if segments:
+                                                prediction_payload = LabelStudioClient.format_prediction_result(segments, duration=duration)
+                                                
+                                                annotation = {
+                                                    "result": prediction_payload["result"],
+                                                    "was_cancelled": False,
+                                                    "ground_truth": False
+                                                }
+                                                
+                                                ls_client.create_annotation(task_id, annotation)
+                                                st.caption(f"Found {len(segments)} active segments for {v['meta'].get('mouse_id')}")
+                                        except Exception as e:
+                                            st.warning(f"Motion detection failed for {v['meta'].get('processed_file')}: {e}")
+                                else:
+                                    st.error(f"Failed to create task for {v['meta'].get('processed_file')}")
+
+                                progress_bar.progress((i + 1) / len(found_videos))
                         
-                        if tasks:
-                            ls_client.import_tasks(project_id, tasks)
-                            st.success(f"Successfully imported {len(tasks)} tasks to Project #{project_id}!")
+                        if uploaded_count > 0:
+                            st.success(f"Successfully imported {uploaded_count} tasks to Project #{project_id}!")
                             st.markdown(f"[Open Label Studio](http://localhost:8080/projects/{project_id})")
                         else:
                             st.warning("No tasks generated. Something went wrong with matching selections.")

@@ -50,7 +50,7 @@ The system relies on Google Drive as the central repository for raw videos and f
 | :---- | :---- | :---- | :---- |
 | **HEU-01** | Frame Difference Calculator | Calculate pixel intensity changes between consecutive frames to detect movement. | Convert to grayscale $\\rightarrow$ GaussianBlur $\\rightarrow$ absdiff $\\rightarrow$ Threshold. |
 | **HEU-02** | Activity Thresholding | Define "Active" vs. "Sleeping" segments. | If motion\_score \< 500 for \> 5 seconds, mark as Inactive. |
-| **HEU-03** | Timeline Generation | Generate a format Label Studio can read to visualize activity on the timeline. | Export a JSON time-series file compatible with Label Studio's "Audio/Video Regions" format. |
+| **HEU-03** | Pre-annotation Injection | Generate "Active" regions and upload them as predictions to Label Studio. | Construct a JSON payload with `predictions` containing start/end times and upload via API. Allows researchers to skip inactive segments. |
 
 ## **Phase 4: Labelling Interface (LAB)**
 

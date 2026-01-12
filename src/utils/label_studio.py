@@ -2,6 +2,8 @@ import requests
 import logging
 import os
 import sqlite3
+import uuid
+import urllib.parse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -208,6 +210,48 @@ class LabelStudioClient:
             logger.error(f"Failed to import tasks: {e}")
             raise
 
+    @staticmethod
+    def format_prediction_result(segments, model_version="Heuristic_v1", duration=None):
+        """
+        Formats a list of time segments into a Label Studio prediction payload.
+        
+        Args:
+            segments (list): List of dicts {'start': float, 'end': float, 'label': str}
+            model_version (str): Identifier for the model.
+            duration (float, optional): Total duration of the audio/video in seconds.
+            
+        Returns:
+            dict: A prediction object ready to be added to a task's 'predictions' list.
+        """
+        results = []
+        for seg in segments:
+            # Generate a unique ID for the region
+            region_id = str(uuid.uuid4())[:8] # Short UUID is usually sufficient and cleaner
+            
+            result_item = {
+                "id": region_id,
+                "value": {
+                    "start": seg['start'],
+                    "end": seg['end'],
+                    # "channel": 0, # Removed channel to avoid issues with mono/stereo mismatch
+                    "labels": [seg['label']]
+                },
+                # These names must match the XML config
+                "from_name": "label",
+                "to_name": "audio", 
+                "type": "labels"
+            }
+            
+            if duration:
+                result_item["original_length"] = duration
+                
+            results.append(result_item)
+            
+        return {
+            "model_version": model_version,
+            "result": results
+        }
+
     def create_local_storage(self, project_id, path, title="Local Files"):
         """
         Create a Local Storage connection for the project.
@@ -247,4 +291,83 @@ class LabelStudioClient:
             return storage['id']
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to create local storage: {e}")
+            raise
+
+    def create_task(self, project_id, task_data):
+        """
+        Create a single task and return its ID.
+        
+        Args:
+            project_id (int): The ID of the project.
+            task_data (dict): The task data (e.g. {"video": "...", "meta": ...})
+            
+        Returns:
+            int: The ID of the created task, or None if failed.
+        """
+        # Import the task
+        self.import_tasks(project_id, [task_data])
+        
+        # Fetch the ID by filtering on the video URL
+        # This assumes 'video' is a key in the task_data or task_data['data']
+        video_url = task_data.get('data', {}).get('video') or task_data.get('video')
+        
+        if not video_url:
+            logger.warning("Could not determine video URL to fetch task ID.")
+            return None
+            
+        try:
+            # Fetch tasks and filter client-side because server-side filtering/ordering is unreliable
+            # We fetch a large page size to ensure we find the new task
+            url = f"{self.url}/api/tasks?project={project_id}&page_size=100"
+            response = self.session.get(url)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Handle pagination/list response
+            if isinstance(data, dict) and 'tasks' in data:
+                 tasks = data['tasks']
+            elif isinstance(data, list):
+                 tasks = data
+            else:
+                 tasks = []
+            
+            # Filter by video URL and find the latest ID
+            matching_tasks = []
+            for t in tasks:
+                t_video = t.get('data', {}).get('video')
+                # Compare strings directly
+                if t_video == video_url:
+                    matching_tasks.append(t)
+            
+            if matching_tasks:
+                # Sort by ID descending to get the latest one
+                matching_tasks.sort(key=lambda x: x['id'], reverse=True)
+                return matching_tasks[0]['id']
+            else:
+                logger.warning(f"Task created but not found via list: {video_url}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch task ID: {e}")
+            return None
+
+    def create_annotation(self, task_id, annotation_payload):
+        """
+        Create an annotation for a specific task.
+        
+        Args:
+            task_id (int): The ID of the task.
+            annotation_payload (dict): The annotation object.
+            
+        Returns:
+            dict: The created annotation.
+        """
+        try:
+            url = f"{self.url}/api/tasks/{task_id}/annotations"
+            response = self.session.post(url, json=annotation_payload)
+            response.raise_for_status()
+            logger.info(f"Created annotation for Task {task_id}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to create annotation: {e}")
             raise
