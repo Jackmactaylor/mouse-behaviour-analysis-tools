@@ -81,7 +81,12 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 2. Enter the **Mouse Behavior Analysis** project.
 3. Click **Label All Tasks**.
 4. Use the timeline interface (see `docs/labelling_guide.md`) to mark events.
-
+### 4. Export Results
+1. Return to the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
+2. Go to the **Data Export** page.
+3. Select the **Mouse Behavior Analysis** project.
+4. Click **Export Data**.
+5. The processed data will be saved as a CSV file in `workspace/outputs`, ready for analysis.
 ## **Remote Access (Tailscale)**
 
 To access the pipeline from another computer (e.g., viewing results or labelling from a different machine), it is recommended to use [Tailscale](https://tailscale.com/) for a secure, zero-config VPN.
