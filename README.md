@@ -54,7 +54,7 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 3. Initialize the workspace:
    Create the required folder structure using the container:
    ```bash
-   docker-compose exec processor python src/setup_workspace.py
+   docker-compose exec processor python setup_workspace.py
    ```
 
 4. Access the tools:
@@ -81,6 +81,26 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 2. Enter the **Mouse Behavior Analysis** project.
 3. Click **Label All Tasks**.
 4. Use the timeline interface (see `docs/labelling_guide.md`) to mark events.
+
+## **Remote Access (Tailscale)**
+
+To access the pipeline from another computer (e.g., viewing results or labelling from a different machine), it is recommended to use [Tailscale](https://tailscale.com/) for a secure, zero-config VPN.
+
+1.  **Install Tailscale**: Install Tailscale on both the host machine (running Docker) and the client machine.
+2.  **Get Host IP**: Find the Tailscale IP address of the host machine (e.g., `100.x.y.z`).
+3.  **Update Config**: Edit `docker-compose.yml` to trust this IP:
+    *   Update `CSRF_TRUSTED_ORIGINS` in the `label-studio` service:
+        ```yaml
+        - CSRF_TRUSTED_ORIGINS=http://localhost:8080 http://100.x.y.z:8080
+        ```
+    *   Update `LABEL_STUDIO_PUBLIC_URL` in the `processor` service:
+        ```yaml
+        - LABEL_STUDIO_PUBLIC_URL=http://100.x.y.z:8080
+        ```
+4.  **Restart**: Apply changes with `docker-compose up -d`.
+5.  **Access**: On the remote machine, access the tools via:
+    *   **Pipeline Dashboard:** `http://100.x.y.z:8501`
+    *   **Label Studio:** `http://100.x.y.z:8080`
 
 ## **Project Structure**
 

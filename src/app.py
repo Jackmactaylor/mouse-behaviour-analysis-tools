@@ -267,7 +267,27 @@ elif page == "Labelling Queue":
         selected_rows = edited_df[edited_df.Select]
         
         st.divider()
-        
+
+        # Interface Settings (Collapsible)
+        with st.expander("⚙️ Label Studio Interface Settings (Screen Size Tuning)"):
+            st.caption("If the video is cut off on small screens, reduce the player height here.")
+            video_height = st.slider("Video Player Height (px)", min_value=300, max_value=800, value=500, step=50, key="ls_height_slider")
+            
+            # Generate the config with the selected height
+            # We replace the default height="500" with the user selected value
+            current_config = LABEL_STUDIO_CONFIG.replace('height="500"', f'height="{video_height}"')
+            
+            if st.button("Update Interface Layout Only"):
+                ls_client = LabelStudioClient(
+                        username=os.getenv("LABEL_STUDIO_USERNAME"),
+                        password=os.getenv("LABEL_STUDIO_PASSWORD")
+                    )
+                if ls_client.check_connection()[0]:
+                    ls_client.get_or_create_project(PROJECT_TITLE, current_config)
+                    st.success(f"Interface updated to {video_height}px height! Refresh Label Studio to see changes.")
+                else:
+                    st.error("Could not connect to Label Studio.")
+
         # 3. Push to Label Studio
         st.subheader("Push to Label Studio")
         
@@ -297,7 +317,8 @@ elif page == "Labelling Queue":
                     is_connected, error_msg = ls_client.check_connection()
                     
                     if is_connected:
-                        project_id = ls_client.get_or_create_project(PROJECT_TITLE, LABEL_STUDIO_CONFIG)
+                        # Use the config from the slider settings above
+                        project_id = ls_client.get_or_create_project(PROJECT_TITLE, current_config)
                         
                         # Ensure Local Storage is configured
                         # We use /label-studio/files as the storage path because DOCUMENT_ROOT is /
@@ -504,10 +525,21 @@ elif page == "System Check":
         # Check Processed
         processed_path = os.path.join(workspace_path, "processed")
         if os.path.exists(processed_path):
-             st.markdown(f"### 📤 Processed (`/workspace/processed`)")
-             st.write("Cropped videos will appear here.")
+            st.markdown(f"### 📤 Processed (`/workspace/processed`)")
+            
+            processed_files = []
+            for root, _, filenames in os.walk(processed_path):
+                for filename in filenames:
+                    # Optional: Filter for known types if needed, but for system check seeing everything is good
+                    processed_files.append(os.path.relpath(os.path.join(root, filename), processed_path))
+            
+            if len(processed_files) > 0:
+                st.write(f"Found {len(processed_files)} processed items:")
+                st.code("\n".join(processed_files))
+            else:
+                st.info("No processed videos found yet.")
         else:
-             st.error("❌ `/workspace/processed` missing")
+            st.error("❌ `/workspace/processed` missing")
              
     else:
         st.error(f"Workspace not found at `{workspace_path}`.")
