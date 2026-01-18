@@ -79,6 +79,9 @@ def process_export_to_csv(export_data, output_path):
         if group == 'Unknown' and mouse_id != 'Unknown':
             group = mouse_to_group_lookup.get(str(mouse_id), 'Unknown')
             
+        # Check for multi-mouse IDs (List of 4 IDs)
+        mouse_ids_list = task_data.get('mouse_ids', meta.get('mouse_ids', []))
+
         for annotation in task.get('annotations', []):
             # We only care about the final ground truth, usually the most recent one or 
             # simply all attached predictions/annotations. 
@@ -96,12 +99,31 @@ def process_export_to_csv(export_data, output_path):
                     
                     # Assume one label per segment for now, or create multiple records
                     for label in labels:
+                        # Determine Mouse ID for this specific label
+                        current_mouse_id = mouse_id # Default to task-level ID
+                        clean_behavior = label
+
+                        # Logic for Multi-Mouse Labels: e.g. "Rubbing (M1)"
+                        import re
+                        # Look for (M1), (M2), etc.
+                        match = re.search(r"\(M(\d+)\)", label)
+                        if match and mouse_ids_list:
+                            try:
+                                # M1 -> index 0
+                                idx = int(match.group(1)) - 1
+                                if 0 <= idx < len(mouse_ids_list):
+                                    current_mouse_id = mouse_ids_list[idx]
+                                    # Strip the (Mx) suffix for clean reporting
+                                    clean_behavior = re.sub(r"\s*\(M\d+\)", "", label).strip()
+                            except (ValueError, IndexError):
+                                pass
+
                         records.append({
-                            'MouseID': mouse_id,
+                            'MouseID': current_mouse_id,
                             'Group': group,
                             'Date': date_str,
                             'Treatment': treatment,
-                            'Behavior': label,
+                            'Behavior': clean_behavior,
                             'Rub_Start_Time': start,
                             'Rub_End_Time': end,
                             'Duration_Seconds': duration,

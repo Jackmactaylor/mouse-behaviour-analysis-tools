@@ -15,11 +15,11 @@ if current_dir not in sys.path:
 
 try:
     from utils.metadata import parse_video_path, load_group_map
-    from utils.video_processor import crop_video, get_video_fps, get_video_duration
+    from utils.video_processor import crop_video, get_video_fps, get_video_duration, generate_audio_proxy, generate_video_proxy
     from components.roi_selector import render_roi_selector
     from utils.label_studio import LabelStudioClient
     from utils.data_exporter import process_export_to_csv
-    from components.label_studio_config import LABEL_STUDIO_CONFIG, PROJECT_TITLE
+    from components.label_studio_config import LABEL_STUDIO_CONFIG, PROJECT_TITLE, LABEL_STUDIO_MULTI_CONFIG, PROJECT_TITLE_MULTI
     from utils.motion import detect_motion, generate_segments
 except ImportError as e:
     st.error(f"Import Error: {e}. Please ensure you are running from the correct directory.")
@@ -31,12 +31,12 @@ st.title("🐭 Mouse Behavior Analysis Pipeline")
 st.label_studio_url = os.getenv("LABEL_STUDIO_URL", "http://label-studio:8080")
 
 st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Ingestion", "Labelling Queue", "Data Export", "System Check"])
+page = st.sidebar.radio("Go to", ["Ingestion", "ROI Processing", "Labelling Queue", "Data Export", "System Check"])
 
 # --- INGESTION PAGE ---
 if page == "Ingestion":
-    st.header("Ingestion & Pre-processing")
-    st.markdown("Select a raw video, define ROIs for each cage, and generate cropped clips.")
+    st.header("Ingestion (Metadata Registration)")
+    st.markdown("Register raw videos by verifying their metadata. This makes them available for labelling or optional cropping.")
 
     # 1. Inbox Browser
     st.subheader("1. Select Video from Inbox")
@@ -120,10 +120,93 @@ if page == "Ingestion":
         "group": group,
         "treatment": treatment,
         "date": date,
-        "mouse_ids": [m1, m2, m3, m4]
+        "mouse_ids": [m1, m2, m3, m4],
+        "original_file": os.path.basename(selected_video_path),
+        "full_path": selected_video_path # Keep for reference
     }
 
-    # 3. ROI Selection
+    # 3. Registration
+    st.divider()
+    st.subheader("3. Register Video")
+    
+    if st.button("💾 Save Metadata & Register", type="primary"):
+        try:
+            # Create artifact folder: video.mp4 -> video/video.json
+            base_name = os.path.basename(selected_video_path)
+            file_name_no_ext = os.path.splitext(base_name)[0]
+            parent_dir = os.path.dirname(selected_video_path)
+            
+            artifact_dir = os.path.join(parent_dir, file_name_no_ext)
+            os.makedirs(artifact_dir, exist_ok=True)
+            
+            json_path = os.path.join(artifact_dir, file_name_no_ext + ".json")
+            
+            with open(json_path, 'w') as f:
+                json.dump(final_metadata, f, indent=2)
+                
+            st.success(f"Video registered! Metadata saved to `{os.path.relpath(json_path, raw_dir)}`.")
+            st.info("You can now find this video in the 'Labelling Queue' or 'ROI Processing'.")
+            
+        except Exception as e:
+            st.error(f"Failed to save metadata: {e}")
+
+# --- ROI PROCESSING PAGE ---
+elif page == "ROI Processing":
+    st.header("ROI Processing (Optional)")
+    st.markdown("Select a **registered** video, define ROIs, and generate individual cropped clips.")
+    
+    raw_dir = "/workspace/raw"
+    processed_dir = "/workspace/processed"
+    
+    # 1. Scan for Registered Videos (files with JSON sidecars)
+    registered_videos = []
+    if os.path.exists(raw_dir):
+        for root, dirs, files in os.walk(raw_dir):
+            for file in files:
+                if file.lower().endswith(('.mp4', '.m4v', '.mov', '.avi', '.mkv')):
+                    video_path = os.path.join(root, file)
+                    base, _ = os.path.splitext(video_path)
+                    
+                    # Check for legacy sidecar (video.json) or new folder sidecar (video/video.json)
+                    json_path_legacy = base + ".json"
+                    
+                    file_name_no_ext = os.path.splitext(file)[0]
+                    json_path_folder = os.path.join(root, file_name_no_ext, file_name_no_ext + ".json")
+                    
+                    final_json_path = None
+                    if os.path.exists(json_path_folder):
+                        final_json_path = json_path_folder
+                    elif os.path.exists(json_path_legacy):
+                        final_json_path = json_path_legacy
+                    
+                    if final_json_path:
+                        try:
+                            with open(final_json_path, 'r') as f:
+                                meta = json.load(f)
+                                registered_videos.append({
+                                    "path": video_path,
+                                    "meta": meta,
+                                    "rel_path": os.path.relpath(video_path, raw_dir)
+                                })
+                        except:
+                            pass # Skip bad JSONs
+                            
+    if not registered_videos:
+        st.warning("No registered videos found. Please go to **Ingestion** to register videos first.")
+        st.stop()
+        
+    # Selection Dropdown
+    display_names = [f"{v['rel_path']} ({v['meta'].get('group', '?')})" for v in registered_videos]
+    selected_idx = st.selectbox("Select a registered video:", range(len(registered_videos)), format_func=lambda x: display_names[x])
+    
+    selected_video_obj = registered_videos[selected_idx]
+    selected_video_path = selected_video_obj["path"]
+    final_metadata = selected_video_obj["meta"]
+    
+    st.info(f"Selected: `{selected_video_path}`")
+    st.json(final_metadata, expanded=False)
+
+    # 2. ROI Selection
     st.divider()
     
     # Disable ROI selector if processing
@@ -132,6 +215,8 @@ if page == "Ingestion":
         rois = st.session_state.get("current_rois")
     else:
         rois = render_roi_selector(selected_video_path)
+
+    # 3. Processing
 
     # 4. Processing
     st.divider()
@@ -198,212 +283,371 @@ if page == "Ingestion":
 # --- LABELLING QUEUE PAGE ---
 elif page == "Labelling Queue":
     st.header("Labelling Queue")
-    st.markdown("Manage processed videos and push them to Label Studio.")
+    st.markdown("Manage videos and push them to Label Studio.")
     
-    processed_dir = "/workspace/processed"
+    tab1, tab2 = st.tabs(["Raw Videos (Multi-Mouse)", "Processed Clips (Single Mouse)"])
     
-    # 1. Scan for Processed Videos (JSON sidecars)
-    found_videos = []
-    if os.path.exists(processed_dir):
-        for root, dirs, files in os.walk(processed_dir):
-            for file in files:
-                if file.endswith(".json"):
-                    json_path = os.path.join(root, file)
-                    try:
-                        with open(json_path, 'r') as f:
-                            meta = json.load(f)
-                            # Verify the video file exists
-                            video_filename = meta.get("processed_file")
-                            if video_filename:
-                                video_path = os.path.join(root, video_filename)
-                                if os.path.exists(video_path):
-                                    found_videos.append({
-                                        "path": video_path,
-                                        "meta": meta,
-                                        "rel_path": os.path.relpath(video_path, processed_dir)
-                                    })
-                    except Exception as e:
-                        st.warning(f"Error reading {file}: {e}")
-    
-    if not found_videos:
-        st.info("No processed videos found. Go to 'Ingestion' to process raw videos.")
-    else:
-        st.write(f"Found {len(found_videos)} processed videos.")
+    # --- TAB 1: RAW VIDEOS ---
+    with tab1:
+        st.subheader("Raw Videos (Full Frame)")
+        raw_dir = "/workspace/raw"
         
-        # 2. Selection Table
-        # Create a dataframe-like structure for display
-        import pandas as pd
-        
-        data = []
-        for v in found_videos:
-            m = v["meta"]
-            data.append({
-                "Select": False,
-                "Mouse ID": m.get("mouse_id"),
-                "Date": m.get("date"),
-                "Treatment": m.get("treatment"),
-                "Group": m.get("group"),
-                "File": m.get("processed_file")
-            })
-            
-        df = pd.DataFrame(data)
-        
-        # Use Streamlit's data editor for selection (requires Streamlit 1.23+)
-        # Since we are on 1.29, this is perfect.
-        edited_df = st.data_editor(
-            df,
-            column_config={
-                "Select": st.column_config.CheckboxColumn(
-                    "Select",
-                    help="Select to upload",
-                    default=False,
-                )
-            },
-            disabled=["Mouse ID", "Date", "Treatment", "Group", "File"],
-            hide_index=True,
-        )
-        
-        # Get selected rows
-        selected_rows = edited_df[edited_df.Select]
-        
-        st.divider()
-
-        # Interface Settings (Collapsible)
-        with st.expander("⚙️ Label Studio Interface Settings (Screen Size Tuning)"):
-            st.caption("If the video is cut off on small screens, reduce the player height here.")
-            video_height = st.slider("Video Player Height (px)", min_value=300, max_value=800, value=500, step=50, key="ls_height_slider")
-            
-            # Generate the config with the selected height
-            # We replace the default height="500" with the user selected value
-            current_config = LABEL_STUDIO_CONFIG.replace('height="500"', f'height="{video_height}"')
-            
-            if st.button("Update Interface Layout Only"):
-                ls_client = LabelStudioClient(
-                        username=os.getenv("LABEL_STUDIO_USERNAME"),
-                        password=os.getenv("LABEL_STUDIO_PASSWORD")
-                    )
-                if ls_client.check_connection()[0]:
-                    ls_client.get_or_create_project(PROJECT_TITLE, current_config)
-                    st.success(f"Interface updated to {video_height}px height! Refresh Label Studio to see changes.")
-                else:
-                    st.error("Could not connect to Label Studio.")
-
-        # 3. Push to Label Studio
-        st.subheader("Push to Label Studio")
-        
-        st.info("Authentication is handled automatically via system credentials.")
-
-        # Motion Detection Options
-        use_motion_detection = st.checkbox("Run Motion Detection (Skip Inactive Periods)", value=True, help="Analyzes video to find active segments and uploads them as pre-annotations.")
-        
-        if use_motion_detection:
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                motion_threshold = st.slider("Motion Threshold", 100, 2000, 500, help="Higher = Less sensitive (ignores small movements)")
-            with col_m2:
-                min_duration = st.slider("Min Duration (s)", 0.5, 5.0, 1.0, help="Ignore movements shorter than this")
-
-        if not selected_rows.empty:
-            st.write(f"Selected {len(selected_rows)} videos for upload.")
-            
-            if st.button("🚀 Upload Selected Tasks"):
-                try:
-                    # Initialize client with env vars (username/password)
-                    ls_client = LabelStudioClient(
-                        username=os.getenv("LABEL_STUDIO_USERNAME"),
-                        password=os.getenv("LABEL_STUDIO_PASSWORD")
-                    )
-                    
-                    is_connected, error_msg = ls_client.check_connection()
-                    
-                    if is_connected:
-                        # Use the config from the slider settings above
-                        project_id = ls_client.get_or_create_project(PROJECT_TITLE, current_config)
-                        
-                        # Ensure Local Storage is configured
-                        # We use /label-studio/files as the storage path because DOCUMENT_ROOT is /
-                        ls_client.create_local_storage(project_id, "/label-studio/files")
-                        
-                        tasks = []
-                        # Match selected rows back to found_videos
-                        # We can use the 'File' column (filename) as a key, assuming uniqueness within the list
-                        # Or better, iterate through found_videos and check if they are in selected_rows
-                        
-                        selected_filenames = selected_rows["File"].tolist()
-                        
-                        # Progress bar for motion detection
-                        progress_bar = st.progress(0.0)
-                        status_text = st.empty()
-                        
-                        uploaded_count = 0
-                        
-                        for i, v in enumerate(found_videos):
-                            if v["meta"].get("processed_file") in selected_filenames:
-                                status_text.text(f"Processing {v['meta'].get('processed_file')}...")
-                                
-                                # Construct Task
-                                rel_path = v["rel_path"].replace(os.sep, '/')
-                                video_url = f"/data/local-files/?d=label-studio/files/{rel_path}"
-                                
-                                fps = get_video_fps(v["path"])
-                                duration = get_video_duration(v["path"])
-                                if fps == 0: fps = 60.0
-                                
-                                task_data = {
-                                    "video": video_url,
-                                    "fps": fps,
-                                    "meta": v["meta"],
-                                    "filename": v["meta"].get("processed_file"),
-                                    "mouse_id": v["meta"].get("mouse_id")
-                                }
-                                
-                                # 1. Create Task
-                                task_id = ls_client.create_task(project_id, task_data)
-                                
-                                if task_id:
-                                    uploaded_count += 1
+        # Scan for Registered Videos
+        raw_videos = []
+        if os.path.exists(raw_dir):
+            for root, dirs, files in os.walk(raw_dir):
+                for file in files:
+                    # Look for sidecar JSONs
+                    if file.endswith(".json"):
+                        json_path = os.path.join(root, file)
+                        try:
+                            with open(json_path, 'r') as f:
+                                meta = json.load(f)
+                                # Check if this is a registered raw video (has original_file key)
+                                if "original_file" in meta:
+                                    vid_file = meta["original_file"]
+                                    # Fallback if original_file is just filename, check path
+                                    full_vid_path = meta.get("full_path")
                                     
-                                    # 2. Run Motion Detection & Upload Annotation
-                                    if use_motion_detection:
-                                        status_text.text(f"Scanning for motion: {v['meta'].get('processed_file')}...")
-                                        try:
-                                            motion_scores = detect_motion(v["path"])
-                                            segments = generate_segments(motion_scores, threshold=motion_threshold, min_duration=min_duration)
-                                            
-                                            if segments:
-                                                prediction_payload = LabelStudioClient.format_prediction_result(segments, duration=duration)
-                                                
-                                                annotation = {
-                                                    "result": prediction_payload["result"],
-                                                    "was_cancelled": False,
-                                                    "ground_truth": False
-                                                }
-                                                
-                                                ls_client.create_annotation(task_id, annotation)
-                                                st.caption(f"Found {len(segments)} active segments for {v['meta'].get('mouse_id')}")
-                                        except Exception as e:
-                                            st.warning(f"Motion detection failed for {v['meta'].get('processed_file')}: {e}")
-                                else:
-                                    st.error(f"Failed to create task for {v['meta'].get('processed_file')}")
+                                    # Logic to find the video if full_path is outdated or relative
+                                    # If JSON is in raw/Video/Video.json, root is raw/Video
+                                    # Video might be in raw/Video.mp4 (parent of root)
+                                    if not full_vid_path or not os.path.exists(full_vid_path):
+                                        # Check same dir
+                                        check_1 = os.path.join(root, vid_file)
+                                        # Check parent dir
+                                        check_2 = os.path.join(os.path.dirname(root), vid_file)
+                                        
+                                        if os.path.exists(check_1):
+                                            full_vid_path = check_1
+                                        elif os.path.exists(check_2):
+                                            full_vid_path = check_2
 
-                                progress_bar.progress((i + 1) / len(found_videos))
-                        
-                        if uploaded_count > 0:
-                            st.success(f"Successfully imported {uploaded_count} tasks to Project #{project_id}!")
-                            
-                            # Get public URL for Label Studio (useful for remote access via Tailscale)
-                            ls_public_url = os.getenv("LABEL_STUDIO_PUBLIC_URL", "http://localhost:8080").rstrip('/')
-                            st.markdown(f"[Open Label Studio]({ls_public_url}/projects/{project_id})")
-                        else:
-                            st.warning("No tasks generated. Something went wrong with matching selections.")
-                            
-                    else:
-                        st.error(f"Could not connect to Label Studio: {error_msg}")
-                        
-                except Exception as e:
-                    st.error(f"Upload failed: {e}")
+                                    if full_vid_path and os.path.exists(full_vid_path):
+                                        raw_videos.append({
+                                            "path": full_vid_path,
+                                            "meta": meta,
+                                            "rel_path": os.path.relpath(full_vid_path, raw_dir),
+                                            "json_dir": root # Tracking where the JSON lives for artifact storage
+                                        })
+                        except:
+                            pass
+
+        if not raw_videos:
+            st.info("No registered raw videos found.")
         else:
-            st.info("Select videos in the table above to enable upload.")
+            # Table
+            data_raw = []
+            for v in raw_videos:
+                m = v["meta"]
+                data_raw.append({
+                    "Select": False,
+                    "Group": m.get("group"),
+                    "Date": m.get("date"),
+                    "Mice": str(m.get("mouse_ids")),
+                    "File": os.path.basename(v["path"])
+                })
+            
+            df_raw = pd.DataFrame(data_raw)
+            edited_df_raw = st.data_editor(df_raw, column_config={"Select": st.column_config.CheckboxColumn("Select", default=False)}, hide_index=True, key="editor_raw")
+            selected_raw = edited_df_raw[edited_df_raw.Select]
+            
+            if not selected_raw.empty:
+                # Options
+                use_proxy = st.checkbox("Generate Optimized Video Proxy (Recommended for slow connections)", value=True, help="Creates a compressed 720p version of the video for faster loading. Requires valid FFmpeg.")
+                
+                if st.button("🚀 Upload Raw Videos to Label Studio"):
+                    ls_client = LabelStudioClient(username=os.getenv("LABEL_STUDIO_USERNAME"), password=os.getenv("LABEL_STUDIO_PASSWORD"))
+                    if ls_client.check_connection()[0]:
+                        # Use MULTI config
+                        project_id = ls_client.get_or_create_project(PROJECT_TITLE_MULTI, LABEL_STUDIO_MULTI_CONFIG)
+                        
+                        # Ensure /label-studio/raw is registered as storage source
+                        ls_client.create_local_storage(project_id, "/label-studio/raw", title="Raw Videos")
+                        
+                        # Creating tasks...
+                        status_text = st.empty()
+                        progress_bar = st.progress(0.0)
+                        count = 0 
+                        total_items = len(selected_raw)
+                        
+                        for i, (idx, row) in enumerate(selected_raw.iterrows()):
+                             # Find original vid object
+                             fname = row["File"]
+                             v_obj = next((v for v in raw_videos if os.path.basename(v["path"]) == fname), None)
+                             if v_obj:
+                                 status_text.text(f"Processing ({i+1}/{total_items}): {fname}...")
+                                 
+                                 # URL path: /data/local-files/?d=label-studio/raw/...
+                                 # v_obj["rel_path"] is relative to /workspace/raw
+                                 path_inside_container = v_obj["rel_path"].replace(os.sep, '/')
+                                 
+                                 # Default to original
+                                 final_video_url = f"/data/local-files/?d=label-studio/raw/{path_inside_container}"
+
+                                 # Determine Artifact Directory
+                                 base_name = os.path.splitext(fname)[0] 
+                                 
+                                 # Use json_dir from scanner if available, or deduce
+                                 json_dir = v_obj.get("json_dir")
+                                 
+                                 # Logic: If json_dir looks like .../VideoName, use it.
+                                 # Else, create .../raw/VideoName
+                                 if json_dir and os.path.basename(json_dir) == base_name:
+                                     artifact_dir = json_dir
+                                 else:
+                                     # parent_dir of video
+                                     parent_dir_video = os.path.dirname(v_obj["path"])
+                                     artifact_dir = os.path.join(parent_dir_video, base_name)
+                                     os.makedirs(artifact_dir, exist_ok=True)
+
+                                 # Generate Audio Proxy (MP3) - Always done for sync
+                                 msg_container = st.empty()
+                                 msg_container.caption(f"Generating optimized audio for {fname}...")
+                                 
+                                 audio_filename = f"{base_name}_audio.mp3"
+                                 audio_abs_path = os.path.join(artifact_dir, audio_filename)
+                                 
+                                 generate_audio_proxy(v_obj["path"], audio_abs_path)
+                                 
+                                 # Audio URL
+                                 # Path relative to RAW root
+                                 # if artifact_dir is /workspace/raw/VideoName -> rel is VideoName
+                                 # Warning: relpath might contain '..' if we are outside. But we assume we are inside raw.
+                                 rel_artifact_dir = os.path.relpath(artifact_dir, "/workspace/raw")
+                                 audio_rel_path = os.path.join(rel_artifact_dir, audio_filename).replace(os.sep, '/')
+                                 
+                                 audio_url = f"/data/local-files/?d=label-studio/raw/{audio_rel_path}"
+
+                                 # Generate Video Proxy (Optional)
+                                 if use_proxy:
+                                     # Define a callback that updates the status text
+                                     def proxy_prog_callback(p):
+                                         pct = int(p * 100)
+                                         status_text.text(f"Processing ({i+1}/{total_items}): {fname}... (Generating Video Proxy: {pct}%)")
+                                     
+                                     msg_container.caption(f"Generating optimized video proxy for {fname} (this may take a minute)...")
+                                     proxy_filename = f"{base_name}_proxy.mp4"
+                                     proxy_abs_path = os.path.join(artifact_dir, proxy_filename)
+                                     
+                                     if generate_video_proxy(v_obj["path"], proxy_abs_path, progress_callback=proxy_prog_callback):
+                                         # Update URL to point to proxy
+                                         proxy_rel_path = os.path.join(rel_artifact_dir, proxy_filename).replace(os.sep, '/')
+                                         final_video_url = f"/data/local-files/?d=label-studio/raw/{proxy_rel_path}"
+                                     else:
+                                         st.warning(f"Video proxy generation failed for {fname}. Using original.")
+                                         # Restore status text
+                                         status_text.text(f"Processing ({i+1}/{total_items}): {fname}...")
+
+                                 msg_container.empty()
+                                 
+                                 task_data = {
+                                    "video": final_video_url,
+                                    "audio": audio_url,
+                                    "meta": v_obj["meta"],
+                                    "filename": fname,
+                                    "mouse_ids": v_obj["meta"].get("mouse_ids") # Pass all IDs
+                                 }
+                                 if ls_client.create_task(project_id, task_data):
+                                     count += 1
+                                     
+                             # Update progress
+                             progress_bar.progress((i + 1) / total_items)
+                        
+                        status_text.empty()
+                        
+                        st.success(f"Uploaded {count} tasks to '{PROJECT_TITLE_MULTI}'")
+                    else:
+                        st.error("Connection failed.")
+
+    # --- TAB 2: PROCESSED CLIPS ---
+    with tab2:
+        st.subheader("Processed Clips (Cropped)")
+        processed_dir = "/workspace/processed"
+        
+        # 1. Scan for Processed Videos (JSON sidecars)
+        found_videos = []
+        if os.path.exists(processed_dir):
+            for root, dirs, files in os.walk(processed_dir):
+                for file in files:
+                    if file.endswith(".json"):
+                        json_path = os.path.join(root, file)
+                        try:
+                            with open(json_path, 'r') as f:
+                                meta = json.load(f)
+                                # Verify the video file exists
+                                video_filename = meta.get("processed_file")
+                                if video_filename:
+                                    video_path = os.path.join(root, video_filename)
+                                    if os.path.exists(video_path):
+                                        found_videos.append({
+                                            "path": video_path,
+                                            "meta": meta,
+                                            "rel_path": os.path.relpath(video_path, processed_dir)
+                                        })
+                        except Exception as e:
+                           pass
+        
+        if not found_videos:
+            st.info("No processed videos found.")
+        else:
+            # Selection Table
+            data = []
+            for v in found_videos:
+                m = v["meta"]
+                data.append({
+                    "Select": False,
+                    "Mouse ID": m.get("mouse_id"),
+                    "Date": m.get("date"),
+                    "Treatment": m.get("treatment"),
+                    "Group": m.get("group"),
+                    "File": m.get("processed_file")
+                })
+                
+            df = pd.DataFrame(data)
+            edited_df = st.data_editor(
+                df,
+                column_config={"Select": st.column_config.CheckboxColumn("Select", default=False)},
+                hide_index=True,
+                key="editor_processed"
+            )
+            
+            selected_rows = edited_df[edited_df.Select]
+            
+            st.divider()
+
+            # Interface Settings (Collapsible)
+            with st.expander("⚙️ Label Studio Interface Settings (Screen Size Tuning)"):
+                st.caption("If the video is cut off on small screens, reduce the player height here.")
+                video_height = st.slider("Video Player Height (px)", min_value=300, max_value=800, value=500, step=50, key="ls_height_slider")
+                
+                # Generate the config with the selected height
+                current_config = LABEL_STUDIO_CONFIG.replace('height="500"', f'height="{video_height}"')
+                
+                if st.button("Update Interface Layout Only"):
+                    ls_client = LabelStudioClient(
+                            username=os.getenv("LABEL_STUDIO_USERNAME"),
+                            password=os.getenv("LABEL_STUDIO_PASSWORD")
+                        )
+                    if ls_client.check_connection()[0]:
+                        ls_client.get_or_create_project(PROJECT_TITLE, current_config)
+                        st.success(f"Interface updated to {video_height}px height! Refresh Label Studio to see changes.")
+                    else:
+                        st.error("Could not connect to Label Studio.")
+
+            # 3. Push to Label Studio
+            st.subheader("Push to Label Studio")
+            
+            st.info("Authentication is handled automatically via system credentials.")
+
+            # Motion Detection Options
+            use_motion_detection = st.checkbox("Run Motion Detection (Skip Inactive Periods)", value=True, help="Analyzes video to find active segments and uploads them as pre-annotations.")
+            
+            if use_motion_detection:
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    motion_threshold = st.slider("Motion Threshold", 100, 2000, 500, help="Higher = Less sensitive (ignores small movements)")
+                with col_m2:
+                    min_duration = st.slider("Min Duration (s)", 0.5, 5.0, 1.0, help="Ignore movements shorter than this")
+
+            if not selected_rows.empty:
+                st.write(f"Selected {len(selected_rows)} videos for upload.")
+                
+                if st.button("🚀 Upload Selected Tasks"):
+                    try:
+                        # Initialize client with env vars (username/password)
+                        ls_client = LabelStudioClient(
+                            username=os.getenv("LABEL_STUDIO_USERNAME"),
+                            password=os.getenv("LABEL_STUDIO_PASSWORD")
+                        )
+                        
+                        is_connected, error_msg = ls_client.check_connection()
+                        
+                        if is_connected:
+                            # Use the config from the slider settings above
+                            project_id = ls_client.get_or_create_project(PROJECT_TITLE, current_config)
+                            
+                            # Ensure Local Storage is configured
+                            # For processed clips, we currently map ./workspace/processed -> /label-studio/files
+                            ls_client.create_local_storage(project_id, "/label-studio/files")
+                            
+                            tasks = []
+                            selected_filenames = selected_rows["File"].tolist()
+                            
+                            # Progress bar for motion detection
+                            progress_bar = st.progress(0.0)
+                            status_text = st.empty()
+                            
+                            uploaded_count = 0
+                            
+                            for i, v in enumerate(found_videos):
+                                if v["meta"].get("processed_file") in selected_filenames:
+                                    status_text.text(f"Processing {v['meta'].get('processed_file')}...")
+                                    
+                                    # Construct Task
+                                    # Mapped path: /workspace/processed -> /label-studio/files
+                                    rel_path = v["rel_path"].replace(os.sep, '/')
+                                    video_url = f"/data/local-files/?d=label-studio/files/{rel_path}"
+                                    
+                                    fps = get_video_fps(v["path"])
+                                    duration = get_video_duration(v["path"])
+                                    if fps == 0: fps = 60.0
+                                    
+                                    task_data = {
+                                        "video": video_url,
+                                        "fps": fps,
+                                        "meta": v["meta"],
+                                        "filename": v["meta"].get("processed_file"),
+                                        "mouse_id": v["meta"].get("mouse_id")
+                                    }
+                                    
+                                    # 1. Create Task
+                                    task_id = ls_client.create_task(project_id, task_data)
+                                    
+                                    if task_id:
+                                        uploaded_count += 1
+                                        
+                                        # 2. Run Motion Detection & Upload Annotation
+                                        if use_motion_detection:
+                                            status_text.text(f"Scanning for motion: {v['meta'].get('processed_file')}...")
+                                            try:
+                                                motion_scores = detect_motion(v["path"])
+                                                segments = generate_segments(motion_scores, threshold=motion_threshold, min_duration=min_duration)
+                                                
+                                                if segments:
+                                                    prediction_payload = LabelStudioClient.format_prediction_result(segments, duration=duration)
+                                                    
+                                                    annotation = {
+                                                        "result": prediction_payload["result"],
+                                                        "was_cancelled": False,
+                                                        "ground_truth": False
+                                                    }
+                                                    
+                                                    ls_client.create_annotation(task_id, annotation)
+                                                    st.caption(f"Found {len(segments)} active segments for {v['meta'].get('mouse_id')}")
+                                            except Exception as e:
+                                                st.warning(f"Motion detection failed for {v['meta'].get('processed_file')}: {e}")
+                                    else:
+                                        st.error(f"Failed to create task for {v['meta'].get('processed_file')}")
+
+                                    progress_bar.progress((i + 1) / len(found_videos))
+                            
+                            if uploaded_count > 0:
+                                st.success(f"Successfully imported {uploaded_count} tasks to Project #{project_id}!")
+                                
+                                # Get public URL for Label Studio (useful for remote access via Tailscale)
+                                ls_public_url = os.getenv("LABEL_STUDIO_PUBLIC_URL", "http://localhost:8080").rstrip('/')
+                                st.markdown(f"[Open Label Studio]({ls_public_url}/projects/{project_id})")
+                            else:
+                                st.warning("No tasks generated. Something went wrong with matching selections.")
+                                
+                        else:
+                            st.error(f"Could not connect to Label Studio: {error_msg}")
+                            
+                    except Exception as e:
+                        st.error(f"Upload failed: {e}")
+            else:
+                st.info("Select videos in the table above to enable upload.")
 
 # --- DATA EXPORT PAGE ---
 elif page == "Data Export":

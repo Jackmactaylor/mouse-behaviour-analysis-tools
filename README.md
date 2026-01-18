@@ -63,29 +63,33 @@ This pipeline automates the tedious parts of the workflow, allowing researchers 
 
 ## **Workflow Guide**
 
-### **1. Ingestion (Crop & Process)**
+### **1. Ingestion (Registration)**
 1. Copy your raw video files into the `workspace/raw` folder (The "Inbox").
 2. Open the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
 3. Go to the **Ingestion** page.
-4. Select a video, verify the metadata, and draw 4 boxes around the cages.
-5. Click **Process**. This creates 4 individual mouse videos in `workspace/processed`.
+4. Select a video, verify the metadata (Mouse IDs, Treatment), and click **Save Metadata & Register**.
+5. This creates a registration sidecar file, making the video available for labelling or cropping.
 
-### **2. Push to Label Studio**
-1. Go to the **Labelling Queue** page in the Dashboard.
-2. You will see a list of all processed videos. Select the ones you want to label.
-3. Click **Upload Selected Tasks**.
-   - *Note:* The system automatically authenticates with Label Studio using the configured environment credentials. No manual API token is required.
+### **2. Labelling (Multi-Mouse)**
+1. Go to the **Labelling Queue** page.
+2. Select the **Raw Videos (Multi-Mouse)** tab.
+3. Select your registered videos and click **Upload Raw Videos to Label Studio**.
+4. Open Label Studio and label all 4 mice simultaneously using the specific per-cage labels (e.g., "Rubbing (M1)").
 
-### **3. Labelling**
-1. Open Label Studio.
-2. Enter the **Mouse Behavior Analysis** project.
-3. Click **Label All Tasks**.
-4. Use the timeline interface (see `docs/labelling_guide.md`) to mark events.
-### 4. Export Results
+### **3. Optional: ROI Cropping**
+If you prefer single-mouse videos:
+1. Go to the **ROI Processing** page.
+2. Select a registered video.
+3. Draw ROI boxes for each cage.
+4. Click **Crop & Process**.
+5. Go to **Labelling Queue** -> **Processed Clips** tab to upload these individual files.
+
+### **4. Export Results**
 1. Return to the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
 2. Go to the **Data Export** page.
-3. Select the **Mouse Behavior Analysis** project.
+3. Select the project.
 4. Click **Export Data**.
+   - The exporter automatically maps "M1" labels back to the specific Mouse ID defined during registration.
 5. The processed data will be saved as a CSV file in `workspace/outputs`, ready for analysis.
 ## **Remote Access (Tailscale)**
 

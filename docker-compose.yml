@@ -14,6 +14,7 @@ services:
     volumes:
       - ./label-studio_data:/label-studio/data
       - ./workspace/processed:/label-studio/files
+      - ./workspace/raw:/label-studio/raw
     restart: unless-stopped
 
   processor:

@@ -248,3 +248,158 @@ def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Di
                 generated_files.append(result)
             
     return sorted(generated_files)
+
+def generate_audio_proxy(input_path: str, output_path: str) -> bool:
+    """
+    Generates a lightweight audio proxy (MP3) for a video file.
+    Used by Label Studio to render the waveform without loading the full video.
+    
+    Args:
+        input_path: Path to the source video.
+        output_path: Path where the MP3 should be saved.
+        
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    try:
+        # Check if output already exists
+        if os.path.exists(output_path):
+            return True
+            
+        print(f"Generating audio proxy for {input_path} -> {output_path}")
+        
+        # Check for audio stream first
+        if has_audio_stream(input_path):
+            # Extract audio: -vn (no video), -ac 1 (mono), -ar 44100, -b:a 64k (low bitrate)
+            # using -y to overwrite
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", input_path,
+                "-vn",
+                "-ac", "1",
+                "-ar", "44100",
+                "-b:a", "64k",
+                output_path
+            ]
+        else:
+            # Generate silence matching duration
+            duration = get_video_duration(input_path)
+            if duration <= 0:
+                duration = 10 # Fallback
+                
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", "anullsrc=r=44100:cl=mono",
+                "-t", str(duration),
+                "-b:a", "64k",
+                output_path
+            ]
+            
+        # Run command
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        if result.returncode != 0:
+            print(f"FFmpeg Error: {result.stderr}")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        print(f"Error generating audio proxy: {e}")
+        return False
+
+def generate_video_proxy(input_path: str, output_path: str, height: int = 720, crf: int = 26, progress_callback: Optional[Callable[[float], None]] = None) -> bool:
+    """
+    Generates a web-optimized, smaller video proxy for labelling.
+    Resizes, compresses, removes audio, and adds faststart flags.
+    
+    Args:
+        input_path: Path to source video.
+        output_path: Path to save proxy.
+        height: Target height (default 720p). Width is auto-scaled.
+        crf: Constant Rate Factor (18-28). Higher = lower quality/size.
+        progress_callback: Optional callback receiving float 0.0-1.0.
+        
+    Returns:
+        bool: True if successful.
+    """
+    try:
+        # Check if output exists. Note: In a real scenarios, you might want to overwrite if settings changed.
+        # But for valid cache, we skip.
+        if os.path.exists(output_path):
+            if progress_callback: progress_callback(1.0)
+            return True
+            
+        print(f"Generating video proxy for {input_path} -> {output_path}")
+
+        # ffmpeg -i input -vf scale=-2:720 -c:v libx264 -crf 26 -preset veryfast -an -movflags +faststart output
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", f"scale=-2:{height}",
+            "-c:v", "libx264",
+            "-crf", str(crf),
+            "-preset", "veryfast",
+            "-an", # Remove audio (we use separate audio proxy)
+            "-movflags", "+faststart",
+            output_path
+        ]
+        
+        if progress_callback:
+            total_duration = get_video_duration(input_path)
+            # Use machine-readable progress on stdout
+            cmd.extend(["-progress", "pipe:1"])
+            
+            # Start process
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    if process.poll() is not None:
+                        break
+                    continue
+                
+                line = line.strip()
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    if key == "out_time_us":
+                        try:
+                            # out_time_us is in microseconds
+                            us = int(value)
+                            current_seconds = us / 1_000_000.0
+                            if total_duration > 0:
+                                progress = min(1.0, current_seconds / total_duration)
+                                progress_callback(progress)
+                        except ValueError:
+                            pass
+
+            # Wait for finish
+            process.wait()
+            
+            if process.returncode != 0:
+                # Read stderr for error details
+                err = process.stderr.read()
+                print(f"FFmpeg Error (Video Proxy): {err}")
+                return False
+            return True
+            
+        else:
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                print(f"FFmpeg Error (Video Proxy): {result.stderr}")
+                return False
+            return True
+
+    except Exception as e:
+        print(f"Error generating video proxy: {e}")
+        return False
+
