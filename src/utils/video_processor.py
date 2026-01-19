@@ -355,7 +355,8 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
             process = subprocess.Popen(
                 cmd, 
                 stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
+                # Redirect stderr to DEVNULL to prevent pipe buffer deadlocks on large files
+                stderr=subprocess.DEVNULL, 
                 text=True,
                 encoding='utf-8',
                 errors='replace'
@@ -386,9 +387,7 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
             process.wait()
             
             if process.returncode != 0:
-                # Read stderr for error details
-                err = process.stderr.read()
-                print(f"FFmpeg Error (Video Proxy): {err}")
+                print(f"FFmpeg Error (Video Proxy): Process returned {process.returncode}")
                 return False
             return True
             
