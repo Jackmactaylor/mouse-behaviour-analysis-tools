@@ -422,7 +422,11 @@ class LabelStudioClient:
         """
         try:
             url = f"{self.url}/api/projects/{project_id}/export"
-            params = {"exportType": export_type}
+            # Ensure we get all tasks, including those with only drafts or skipped
+            params = {
+                "exportType": export_type,
+                "download_all_tasks": "true"
+            }
             
             response = self.session.get(url, params=params)
             response.raise_for_status()

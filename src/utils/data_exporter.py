@@ -80,13 +80,30 @@ def process_export_to_csv(export_data, output_path):
             group = mouse_to_group_lookup.get(str(mouse_id), 'Unknown')
             
         # Check for multi-mouse IDs (List of 4 IDs)
-        mouse_ids_list = task_data.get('mouse_ids', meta.get('mouse_ids', []))
+        # Ensure we look in both data and meta, and handle None
+        mouse_ids_list = task_data.get('mouse_ids')
+        if mouse_ids_list is None:
+            mouse_ids_list = meta.get('mouse_ids', [])
 
-        for annotation in task.get('annotations', []):
+        # Process both 'annotations' (Submitted) and 'drafts' (Saved but not submitted)
+        # This catches cases where users forgot to finalize the task
+        items_to_process = []
+        for ann in task.get('annotations', []):
+            ann['_status'] = 'Submitted'
+            items_to_process.append(ann)
+        
+        # Also check drafts if no annotations exist, or just include them all?
+        # Including all gives visibility.
+        for draft in task.get('drafts', []):
+            draft['_status'] = 'Draft'
+            items_to_process.append(draft)
+
+        if not items_to_process:
+             logger.debug(f"Task {task.get('id')} has no annotations or drafts.")
+
+        for annotation in items_to_process:
             # We only care about the final ground truth, usually the most recent one or 
             # simply all attached predictions/annotations. 
-            # Phase 5 says "Re-upload Logic" and "Export Formatting".
-            # Usually annotations are the human labels.
             
             for result in annotation.get('result', []):
                 # We interpret "labels" type results
@@ -129,11 +146,12 @@ def process_export_to_csv(export_data, output_path):
                             'Duration_Seconds': duration,
                             'Video_File': os.path.basename(video_path),
                             'Annotator_ID': annotation.get('completed_by', 'Unknown'),
-                            'Task_ID': task.get('id')
+                            'Task_ID': task.get('id'),
+                            'Status': annotation.get('_status', 'Submitted')
                         })
 
     if not records:
-        logger.warning("No labeled segments found in export.")
+        logger.warning("No labeled segments found in export (checked annotations and drafts).")
         return None
 
     df = pd.DataFrame(records)

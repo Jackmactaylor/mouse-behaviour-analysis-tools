@@ -682,6 +682,9 @@ elif page == "Data Export":
                              try:
                                  # 2. Export JSON
                                  export_data = ls_client.export_snapshot(selected_project_id, export_type='JSON')
+                                 
+                                 task_count = len(export_data) if export_data else 0
+                                 st.info(f"Retrieved {task_count} tasks from Label Studio.")
 
                                  # Debug: Show what we got
                                  with st.expander("Debug: Raw Export Data (First Task)"):
