@@ -249,7 +249,7 @@ def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Di
             
     return sorted(generated_files)
 
-def generate_audio_proxy(input_path: str, output_path: str) -> bool:
+def generate_audio_proxy(input_path: str, output_path: str, overwrite: bool = False) -> bool:
     """
     Generates a lightweight audio proxy (MP3) for a video file.
     Used by Label Studio to render the waveform without loading the full video.
@@ -257,13 +257,14 @@ def generate_audio_proxy(input_path: str, output_path: str) -> bool:
     Args:
         input_path: Path to the source video.
         output_path: Path where the MP3 should be saved.
+        overwrite: If True, regenerates the proxy even if it exists.
         
     Returns:
         bool: True if successful, False otherwise.
     """
     try:
         # Check if output already exists
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and not overwrite:
             return True
             
         print(f"Generating audio proxy for {input_path} -> {output_path}")
@@ -309,7 +310,7 @@ def generate_audio_proxy(input_path: str, output_path: str) -> bool:
         print(f"Error generating audio proxy: {e}")
         return False
 
-def generate_video_proxy(input_path: str, output_path: str, height: int = 720, crf: int = 26, progress_callback: Optional[Callable[[float], None]] = None) -> bool:
+def generate_video_proxy(input_path: str, output_path: str, height: int = 720, crf: int = 26, progress_callback: Optional[Callable[[float], None]] = None, overwrite: bool = False) -> bool:
     """
     Generates a web-optimized, smaller video proxy for labelling.
     Resizes, compresses, removes audio, and adds faststart flags.
@@ -320,6 +321,7 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
         height: Target height (default 720p). Width is auto-scaled.
         crf: Constant Rate Factor (18-28). Higher = lower quality/size.
         progress_callback: Optional callback receiving float 0.0-1.0.
+        overwrite: If True, regenerates the proxy even if it exists.
         
     Returns:
         bool: True if successful.
@@ -327,7 +329,7 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
     try:
         # Check if output exists. Note: In a real scenarios, you might want to overwrite if settings changed.
         # But for valid cache, we skip.
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and not overwrite:
             if progress_callback: progress_callback(1.0)
             return True
             

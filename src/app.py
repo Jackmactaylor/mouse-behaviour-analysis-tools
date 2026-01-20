@@ -355,6 +355,7 @@ elif page == "Labelling Queue":
             if not selected_raw.empty:
                 # Options
                 use_proxy = st.checkbox("Generate Optimized Video Proxy (Recommended for slow connections)", value=True, help="Creates a compressed 720p version of the video for faster loading. Requires valid FFmpeg.")
+                force_reprocess = st.checkbox("Force Reprocess Proxies", value=False, help="Re-generate proxy files even if they already exist. Use if proxies are corrupted.")
                 
                 if st.button("🚀 Upload Raw Videos to Label Studio"):
                     ls_client = LabelStudioClient(username=os.getenv("LABEL_STUDIO_USERNAME"), password=os.getenv("LABEL_STUDIO_PASSWORD"))
@@ -408,7 +409,7 @@ elif page == "Labelling Queue":
                                  audio_filename = f"{base_name}_audio.mp3"
                                  audio_abs_path = os.path.join(artifact_dir, audio_filename)
                                  
-                                 generate_audio_proxy(v_obj["path"], audio_abs_path)
+                                 generate_audio_proxy(v_obj["path"], audio_abs_path, overwrite=force_reprocess)
                                  
                                  # Audio URL
                                  # Path relative to RAW root
@@ -430,7 +431,7 @@ elif page == "Labelling Queue":
                                      proxy_filename = f"{base_name}_proxy.mp4"
                                      proxy_abs_path = os.path.join(artifact_dir, proxy_filename)
                                      
-                                     if generate_video_proxy(v_obj["path"], proxy_abs_path, progress_callback=proxy_prog_callback):
+                                     if generate_video_proxy(v_obj["path"], proxy_abs_path, progress_callback=proxy_prog_callback, overwrite=force_reprocess):
                                          # Update URL to point to proxy
                                          proxy_rel_path = os.path.join(rel_artifact_dir, proxy_filename).replace(os.sep, '/')
                                          final_video_url = f"/data/local-files/?d=label-studio/raw/{proxy_rel_path}"
