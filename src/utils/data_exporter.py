@@ -123,11 +123,15 @@ def process_export_to_csv(export_data, output_path):
                         # Logic for Multi-Mouse Labels: e.g. "Rubbing (M1)"
                         import re
                         # Look for (M1), (M2), etc.
+                        label_name = None  # Track which timeline/mouse position (M1-M4)
                         match = re.search(r"\(M(\d+)\)", label)
                         if match and mouse_ids_list:
                             try:
                                 # M1 -> index 0
                                 idx = int(match.group(1)) - 1
+                                mouse_num = match.group(1)  # "1", "2", "3", or "4"
+                                label_name = f"Mouse {mouse_num}"  # Store as "Mouse 1", "Mouse 2", etc.
+                                
                                 if 0 <= idx < len(mouse_ids_list):
                                     current_mouse_id = mouse_ids_list[idx]
                                     # Strip the (Mx) suffix for clean reporting
@@ -137,6 +141,7 @@ def process_export_to_csv(export_data, output_path):
 
                         records.append({
                             'MouseID': current_mouse_id,
+                            'Label_Name': label_name if label_name else 'Unknown',
                             'Group': group,
                             'Date': date_str,
                             'Treatment': treatment,
