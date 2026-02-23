@@ -1,123 +1,179 @@
-# **Mouse Behavior Analysis Pipeline**
+# Mouse Behavior Analysis Pipeline
 
-A local-first toolkit to streamline the quantification of nasal rubbing incidents in experimental mice.
+A local-first, containerised toolkit to streamline the quantification of nasal rubbing events in experimental mice, with structured dataset export for downstream analysis.
 
-## **Project Context & Motivation**
+## Project Context & Motivation
 
-This project was built to address a bottleneck in allergy research. Currently, graduate students manually review long video recordings containing 4 mouse cages simultaneously. To quantify nasal rubbing events (a marker of allergic response to FEL D1), they must:
+This project was built to address a bottleneck in allergy research. Graduate students manually review long video recordings containing 4 mouse cages simultaneously. To quantify nasal rubbing events (a marker of allergic response to Fel d 1), they must:
 
-1. Watch the video for *Mouse 1*.  
-2. Manually log timestamps of rubbing events.  
-3. Rewind and repeat the process for *Mouse 2*, *Mouse 3*, and *Mouse 4*.  
+1. Watch the video for *Mouse 1*.
+2. Manually log timestamps of rubbing events.
+3. Rewind and repeat the process for *Mouse 2*, *Mouse 3*, and *Mouse 4*.
 4. Manually map visual data to mouse IDs stored in separate documents.
 
 This manual process is prone to error, extremely time-consuming, and makes capturing precise duration data nearly impossible.
 
-## **The Solution**
+## The Solution
 
-This pipeline automates the tedious parts of the workflow, allowing researchers to focus solely on the behavioral classification.
+This pipeline automates the tedious parts of the workflow, allowing researchers to focus solely on the behavioral classification. It does **not** perform automated behavioural classification — it supports efficient manual annotation and structured dataset generation.
 
-### **Key Features**
+### Key Features
 
-* **Fixed ROI Cropping:** Automatically splits a single 4-cage video into 4 individual, stabilized mouse videos using a "draw once, crop all" interface.  
-* **Automated Metadata:** Parses the directory structure to automatically tag videos with the correct Mouse ID, Treatment Group, and Date, eliminating lookup errors.  
-* **Motion Heuristics:** (Planned) Pre-scans videos to identify periods of inactivity, allowing researchers to skip hours of footage where the mouse is sleeping.  
-* **Label Studio Integration:** Uses a containerized instance of [Label Studio](https://labelstud.io/) for a robust labelling interface that captures precise start/stop durations via timeline segmentation.
+* **Fixed ROI Cropping:** Splits a single 4-cage video into 4 individual mouse videos using a "draw once, crop all" interface with parallel processing.
+* **Automated Metadata:** Parses filename conventions and a `mouse_map.csv` lookup table to automatically tag videos with Mouse ID, Treatment Group, and Date.
+* **Proxy Media Generation:** Creates lightweight 720p video proxies and MP3 audio proxies for responsive browser playback and waveform-based annotation.
+* **Motion Heuristics:** Optional pre-scan to flag active video segments via frame-to-frame pixel change detection (supplementary aid).
+* **Multi-Mouse Annotation:** Label all 4 mice in a single pass using positional labels (`Rubbing (M1)` through `Rubbing (M4)`), reducing annotation time from 4× to 1× video duration.
+* **Label Studio Integration:** Containerised [Label Studio](https://labelstud.io/) instance for timeline segmentation with precise start/stop durations.
+* **Structured CSV Export:** Automatic mapping of positional labels back to mouse IDs, producing analysis-ready datasets.
 
-## **Architecture**
+## Architecture
 
-**Philosophy: Local Compute, Cloud Truth.**
+**Philosophy: Local Compute, Local Truth.**
 
-* **Storage:** Raw data and final CSV outputs reside in **Google Drive**, ensuring data safety and accessibility for the lab.  
-* **Processing:** Heavy lifting (rendering, labelling) happens on the **local machine** to prevent latency and reduce cloud costs.  
-* **Environment:** The entire stack runs in **Docker**, ensuring that the tool works identically on a researcher's Windows laptop or the lab's Linux workstation.
+* **Storage:** The filesystem acts as the database. All data lives in the `workspace/` directory — no SQL/NoSQL setup required.
+* **Processing:** All video rendering and annotation occurs on the local machine.
+* **Environment:** The entire stack runs in **Docker**, ensuring the tool works identically on a researcher's Windows laptop or a Linux workstation.
 
-## **Getting Started**
+### System Overview
 
-*(Note: This project is currently under active development.)*
+The platform uses a two-service architecture orchestrated via Docker Compose:
 
-### **Prerequisites**
+| Service | Port | Description |
+|---|---|---|
+| **Processor** | 8501 | Streamlit dashboard for ingestion, preprocessing, and export |
+| **Label Studio** | 8080 | Annotation interface (heartexlabs/label-studio v1.12.1) |
 
-* [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running.  
+The processor communicates with Label Studio via REST API to create projects, import tasks with embedded metadata, and retrieve annotations.
 
-### **Installation**
+## Getting Started
 
-1. Clone the repository:  
-   git clone [https://github.com/your-username/mouse-behavior-analysis.git](https://github.com/your-username/mouse-behavior-analysis.git)  
-   cd mouse-behavior-analysis
+### Prerequisites
+
+* [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running.
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/[ORG_OR_USERNAME]/mouse-behaviour-analysis-tools.git
+   cd mouse-behaviour-analysis-tools
+   ```
 
 2. Start the environment:
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
-3. Initialize the workspace:
-   Create the required folder structure using the container:
-   ```bash
-   docker-compose exec processor python setup_workspace.py
-   ```
-
-4. Access the tools:
+3. Access the tools:
    - **Pipeline Dashboard:** [http://localhost:8501](http://localhost:8501)
    - **Label Studio:** [http://localhost:8080](http://localhost:8080)
 
-## **Workflow Guide**
+Default Label Studio credentials: `user@example.com` / `password123` (configurable in `docker-compose.yml`).
 
-### **1. Ingestion (Registration)**
-1. Copy your raw video files into the `workspace/raw` folder (The "Inbox").
+## Workflow Guide
+
+### 1. Ingestion (Registration)
+1. Copy your raw video files into `workspace/raw/`.
 2. Open the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
 3. Go to the **Ingestion** page.
-4. Select a video, verify the metadata (Mouse IDs, Treatment), and click **Save Metadata & Register**.
-5. This creates a registration sidecar file, making the video available for labelling or cropping.
+4. Select a video, verify the auto-parsed metadata (Mouse IDs, Treatment, Date), and click **Save Metadata & Register**.
+5. A JSON sidecar is created, making the video available for labelling or cropping.
 
-### **2. Labelling (Multi-Mouse)**
-1. Go to the **Labelling Queue** page.
-2. Select the **Raw Videos (Multi-Mouse)** tab.
-3. Select your registered videos and click **Upload Raw Videos to Label Studio**.
-4. Open Label Studio and label all 4 mice simultaneously using the specific per-cage labels (e.g., "Rubbing (M1)").
+### 2. Labelling (Multi-Mouse) — Primary Workflow
+1. Go to the **Labelling Queue** page → **Raw Videos (Multi-Mouse)** tab.
+2. Select registered videos. Enable proxy generation (recommended for faster playback).
+3. Click **Upload Raw Videos to Label Studio**.
+4. Open Label Studio and label all 4 mice using positional labels (e.g., `Rubbing (M1)`).
 
-### **3. Optional: ROI Cropping**
-If you prefer single-mouse videos:
+### 3. Optional: ROI Cropping (Single-Mouse)
 1. Go to the **ROI Processing** page.
-2. Select a registered video.
-3. Draw ROI boxes for each cage.
-4. Click **Crop & Process**.
-5. Go to **Labelling Queue** -> **Processed Clips** tab to upload these individual files.
+2. Select a registered video and draw 4 ROI boxes on the first frame.
+3. Click **Crop & Process** (4 clips generated in parallel).
+4. Go to **Labelling Queue** → **Processed Clips** tab to upload individual clips.
 
-### **4. Export Results**
-1. Return to the **Pipeline Dashboard** ([http://localhost:8501](http://localhost:8501)).
-2. Go to the **Data Export** page.
-3. Select the project.
-4. Click **Export Data**.
-   - The exporter automatically maps "M1" labels back to the specific Mouse ID defined during registration.
-5. The processed data will be saved as a CSV file in `workspace/outputs`, ready for analysis.
-## **Remote Access (Tailscale)**
+### 4. Export Results
+1. Go to the **Data Export** page.
+2. Select the Label Studio project.
+3. Click **Export Data**.
+   - The exporter maps positional labels (`M1`) back to specific Mouse IDs from the registered metadata.
+4. A CSV is saved to `workspace/outputs/`, ready for statistical analysis.
 
-To access the pipeline from another computer (e.g., viewing results or labelling from a different machine), it is recommended to use [Tailscale](https://tailscale.com/) for a secure, zero-config VPN.
+See [`docs/labelling_guide.md`](docs/labelling_guide.md) for detailed annotation instructions including hotkeys and interface tips.
 
-1.  **Install Tailscale**: Install Tailscale on both the host machine (running Docker) and the client machine.
-2.  **Get Host IP**: Find the Tailscale IP address of the host machine (e.g., `100.x.y.z`).
-3.  **Update Config**: Edit `docker-compose.yml` to trust this IP:
-    *   Update `CSRF_TRUSTED_ORIGINS` in the `label-studio` service:
-        ```yaml
-        - CSRF_TRUSTED_ORIGINS=http://localhost:8080 http://100.x.y.z:8080
-        ```
-    *   Update `LABEL_STUDIO_PUBLIC_URL` in the `processor` service:
-        ```yaml
-        - LABEL_STUDIO_PUBLIC_URL=http://100.x.y.z:8080
-        ```
-4.  **Restart**: Apply changes with `docker-compose up -d`.
-5.  **Access**: On the remote machine, access the tools via:
-    *   **Pipeline Dashboard:** `http://100.x.y.z:8501`
-    *   **Label Studio:** `http://100.x.y.z:8080`
+## Metadata System
 
-## **Project Structure**
+### Mouse Map
 
-* /src: Python source code for ingestion and processing.  
-* /docker: Dockerfile and configuration for the environment.  
-* /scripts: Utility scripts for data synchronization.  
-* /docs: User guides and architecture diagrams.
+A CSV file (`workspace/mouse_map.csv`) defines group-to-mouse mappings:
 
-## **Contribution**
+```csv
+Group,Treatment,Cage1,Cage2,Cage3,Cage4
+Group 1,Saline-3,212753,211673,213656,214286
+Group 2,Fel d 1-6,213695,211674,213657,213106
+```
 
-This tool is designed for internal lab use. Please open an issue for any bugs found during the labelling process.
+### Resolution Order
+
+1. **Filename parsing** — treatment and date extracted from naming convention (e.g., `Control_Dec2-024.M4V`)
+2. **`mouse_map.csv` lookup** — treatment matched to group, resolving all 4 mouse IDs
+3. **Folder structure fallback** — group name matched against parent directory names
+
+## Remote Access (Tailscale)
+
+To access the pipeline from another computer, use [Tailscale](https://tailscale.com/) for a secure, zero-config VPN.
+
+1. Install Tailscale on both the host machine and the client machine.
+2. Get the Tailscale IP of the host (e.g., `100.x.y.z`).
+3. Edit `docker-compose.yml`:
+   - Update `CSRF_TRUSTED_ORIGINS` in the `label-studio` service:
+     ```yaml
+     - CSRF_TRUSTED_ORIGINS=http://localhost:8080 http://100.x.y.z:8080
+     ```
+   - Update `LABEL_STUDIO_PUBLIC_URL` in the `processor` service:
+     ```yaml
+     - LABEL_STUDIO_PUBLIC_URL=http://100.x.y.z:8080
+     ```
+4. Restart: `docker compose up -d`
+5. Access via `http://100.x.y.z:8501` (Dashboard) and `http://100.x.y.z:8080` (Label Studio).
+
+## Project Structure
+
+```
+src/                    # Python application code
+  app.py                #   Streamlit dashboard (5 pages)
+  components/           #   UI components (ROI selector, Label Studio configs)
+  utils/                #   Core logic (video processing, metadata, LS API, export)
+docker/                 # Dockerfile and container configuration
+docs/                   # Labelling guide and developer guidelines
+tests/                  # Validation and debugging scripts
+workspace/              # Data layer (raw videos, processed clips, CSV exports)
+docker-compose.yml      # Service orchestration
+LICENSE                 # MIT License
+```
+
+## Version Information
+
+| Component | Version |
+|---|---|
+| Python | 3.9 |
+| Docker base image | python:3.9-slim |
+| Label Studio | 1.12.1 |
+| Streamlit | 1.29.0 |
+| ffmpeg-python | 0.2.0 |
+| pandas | 2.1.4 |
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Citation
+
+If used in research, please cite:
+<!-- TODO: Add manuscript reference when published -->
+
+## Contact
+
+Eva Kaufmann
+McGill University
+eva.kaufmann@mcgill.ca
