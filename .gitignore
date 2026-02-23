@@ -1,3 +1,20 @@
 # Ignore workspace data
 workspace/
 !workspace/.gitkeep
+
+# Environment and secret files
+.env
+temp_env
+*.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Label Studio export snapshots (working data, not source)
+label-studio_data/export/
+
+# OS files
+.DS_Store
+Thumbs.db

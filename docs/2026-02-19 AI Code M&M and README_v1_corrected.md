@@ -414,4 +414,4 @@ eva.kaufmann@mcgill.ca
 
 ## License
 
-[FILL IN LICENSE]
+MIT License. See [LICENSE](../LICENSE) for details.
