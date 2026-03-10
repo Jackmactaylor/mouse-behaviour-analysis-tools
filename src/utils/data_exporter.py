@@ -3,7 +3,7 @@ import json
 import os
 import logging
 from datetime import datetime
-from utils.metadata import load_group_map
+from utils.metadata import load_group_map, normalize_treatment_name
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,13 +26,23 @@ def process_export_to_csv(export_data, output_path):
     try:
         group_map = load_group_map()
         mouse_to_group_lookup = {}
+        treatment_to_group_lookup = {}
+        treatment_to_cages_lookup = {}
         for g_name, g_info in group_map.items():
             for m_id in g_info.get('cages', []):
                 if m_id and str(m_id).lower() != 'unknown':
                     mouse_to_group_lookup[str(m_id)] = g_name
+            # Also build treatment -> group/cages lookups (normalized)
+            treatment_name = g_info.get('treatment', '')
+            if treatment_name:
+                norm_treatment = normalize_treatment_name(treatment_name.strip())
+                treatment_to_group_lookup[norm_treatment] = g_name
+                treatment_to_cages_lookup[norm_treatment] = g_info.get('cages', [])
     except Exception as e:
         logger.warning(f"Could not load group map for fallback lookup: {e}")
         mouse_to_group_lookup = {}
+        treatment_to_group_lookup = {}
+        treatment_to_cages_lookup = {}
     
     for i, task in enumerate(export_data):
         # Get metadata from task data
@@ -64,26 +74,47 @@ def process_export_to_csv(export_data, output_path):
         group = task_data.get('group', meta.get('group', 'Unknown'))
         
         # If 'Unknown', try to parse from filename as a fallback
+        # IMPORTANT: Only overwrite fields that are still 'Unknown' to avoid
+        # clobbering valid values already loaded from meta (e.g. for IMG_XXXX
+        # or proxy filenames that don't follow the Treatment_Date convention).
         if mouse_id == 'Unknown' and video_path:
             filename = os.path.basename(video_path)
-            # Expected: MouseID_Date_Treatment_Condition.mp4
-            # e.g., 212753_Dec2_Control.mp4 (from file list in context)
             parts = filename.rsplit('.', 1)[0].split('_')
             if len(parts) >= 2:
                 mouse_id = parts[0]
-                date_str = parts[1]
+                if date_str == 'Unknown':
+                    date_str = parts[1]
             if len(parts) >= 3:
-                treatment = parts[2]
+                if treatment == 'Unknown':
+                    treatment = parts[2]
 
-        # Final Fallback: Look up Group from Mouse ID provided
+        # Final Fallback 1: Look up Group from Mouse ID provided
         if group == 'Unknown' and mouse_id != 'Unknown':
             group = mouse_to_group_lookup.get(str(mouse_id), 'Unknown')
-            
+
+        # Final Fallback 2: Look up Group (and mouse_ids) from Treatment name
+        # Handles cases where group wasn't stored in metadata but treatment was
+        # (e.g. videos uploaded before group resolution was implemented,
+        #  or treatment name variants like 'Fel d-1-3' vs 'Fel d 1-3')
+        if group == 'Unknown' and treatment != 'Unknown':
+            norm_treatment = normalize_treatment_name(treatment.strip())
+            if norm_treatment in treatment_to_group_lookup:
+                group = treatment_to_group_lookup[norm_treatment]
+                logger.info(f"Resolved group '{group}' from treatment '{treatment}'")
+
         # Check for multi-mouse IDs (List of 4 IDs)
         # Ensure we look in both data and meta, and handle None
         mouse_ids_list = task_data.get('mouse_ids')
         if mouse_ids_list is None:
             mouse_ids_list = meta.get('mouse_ids', [])
+
+        # If mouse_ids are all Unknown but we have a valid treatment, fill from group map
+        if (not mouse_ids_list or all(str(m).lower() == 'unknown' for m in mouse_ids_list)):
+            if treatment != 'Unknown':
+                norm_treatment = normalize_treatment_name(treatment.strip())
+                if norm_treatment in treatment_to_cages_lookup:
+                    mouse_ids_list = treatment_to_cages_lookup[norm_treatment]
+                    logger.info(f"Resolved mouse_ids {mouse_ids_list} from treatment '{treatment}'")
 
         # Process both 'annotations' (Submitted) and 'drafts' (Saved but not submitted)
         # This catches cases where users forgot to finalize the task

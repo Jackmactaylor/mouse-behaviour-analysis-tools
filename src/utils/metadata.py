@@ -42,6 +42,17 @@ def load_group_map(csv_path: str = MOUSE_MAP_PATH) -> Dict:
         
     return group_map if group_map else defaults
 
+def normalize_treatment_name(treatment: str) -> str:
+    """Normalize treatment name variants to match mouse_map.csv conventions.
+    Handles cases like 'Fel d-1-3' -> 'Fel d 1-3' and 'Fel d-1-6' -> 'Fel d 1-6'.
+    The raw video files from Jun sessions used hyphens ('Fel d-1-3') while
+    mouse_map.csv and Nov/Dec files use spaces ('Fel d 1-3').
+    """
+    # Replace 'Fel d-<digit>' with 'Fel d <digit>' (hyphen -> space before dose number)
+    normalized = re.sub(r'Fel d-(\d)', r'Fel d \1', treatment)
+    return normalized
+
+
 def parse_video_filename(filename: str) -> Dict[str, str]:
     """
     Parses the filename to extract date, treatment, or other info if present.
@@ -124,12 +135,14 @@ def parse_video_path(file_path: str, root_dir: str = "/workspace/raw") -> Dict:
     group_map = load_group_map()
 
     # 2. Try to match Treatment from filename to Group Map (New Flat Structure)
+    # Uses normalized comparison to handle variants like 'Fel d-1-3' vs 'Fel d 1-3'
     if metadata["treatment"] != "Unknown":
+        normalized_treatment = normalize_treatment_name(metadata["treatment"].strip())
         for g_name, g_data in group_map.items():
-            if g_data.get("treatment", "").strip() == metadata["treatment"].strip():
+            if normalize_treatment_name(g_data.get("treatment", "").strip()) == normalized_treatment:
                 metadata["group"] = g_name
                 metadata["mouse_ids"] = g_data.get("cages", ["Unknown"]*4)
-                # Ensure the mapped treatment is used (cleaner)
+                # Ensure the canonical treatment name from the map is used
                 metadata["treatment"] = g_data.get("treatment") 
                 return metadata
 
