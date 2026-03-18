@@ -1,6 +1,7 @@
 import pandas as pd
 import json
 import os
+import re
 import logging
 from datetime import datetime
 from utils.metadata import load_group_map
@@ -121,7 +122,6 @@ def process_export_to_csv(export_data, output_path):
                         clean_behavior = label
 
                         # Logic for Multi-Mouse Labels: e.g. "Rubbing (M1)"
-                        import re
                         # Look for (M1), (M2), etc.
                         label_name = None  # Track which timeline/mouse position (M1-M4)
                         match = re.search(r"\(M(\d+)\)", label)

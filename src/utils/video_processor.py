@@ -15,7 +15,10 @@ except ImportError:
         add_script_run_ctx = None
         get_script_run_ctx = None
 
+import logging
 from typing import List, Dict, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 def get_video_duration(input_path: str) -> float:
     """Returns the duration of the video in seconds."""
@@ -51,41 +54,6 @@ def has_audio_stream(input_path: str) -> bool:
         return False
     except (ffmpeg.Error, KeyError, ValueError):
         return False
-
-def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Dict, progress_callback: Optional[Callable[[float, str], None]] = None) -> List[str]:
-    """
-    Crops a video into 4 separate files based on ROIs.
-    
-    Args:
-        input_path: Path to source video.
-        rois: List of 4 tuples (x, y, w, h).
-        output_dir: Directory to save outputs.
-        metadata: Dictionary containing 'mouse_ids', 'date', 'treatment'.
-        progress_callback: Optional function to report progress (0.0-1.0) and message.
-    
-    Returns:
-        List of paths to generated files.
-    """
-    generated_files = []
-    
-    mouse_ids = metadata.get("mouse_ids", ["Unknown"] * 4)
-    date = metadata.get("date", "UnknownDate")
-    treatment = metadata.get("treatment", "UnknownTreatment")
-    group = metadata.get("group", "UnknownGroup")
-    
-    total_duration = get_video_duration(input_path)
-
-    # Sanitize metadata for paths
-    safe_date = "".join(c for c in date if c.isalnum() or c in ('-', '_'))
-    safe_treatment = "".join(c for c in treatment if c.isalnum() or c in ('-', '_'))
-    safe_group = "".join(c for c in group if c.isalnum() or c in ('-', '_'))
-
-    # Create structured output directory: output_dir / date / group_treatment
-    sub_dir_name = f"{safe_group}_{safe_treatment}"
-    target_dir = os.path.join(output_dir, safe_date, sub_dir_name)
-    
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
 
 def _process_single_roi(
     roi_index: int,
@@ -173,11 +141,11 @@ def _process_single_roi(
                 json.dump(sidecar_data, f, indent=2)
             return output_path
         else:
-            print(f"FFmpeg failed for ROI {roi_index}")
+            logger.error(f"FFmpeg failed for ROI {roi_index}")
             return None
 
     except Exception as e:
-        print(f"Error processing ROI {roi_index}: {e}")
+        logger.error(f"Error processing ROI {roi_index}: {e}")
         return None
 
 def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Dict, progress_callback: Optional[Callable[[float, str], None]] = None) -> List[str]:
@@ -213,8 +181,8 @@ def crop_video(input_path: str, rois: List[tuple], output_dir: str, metadata: Di
     if get_script_run_ctx:
         try:
             script_run_ctx = get_script_run_ctx()
-        except:
-            pass
+        except Exception:
+            logger.debug("Failed to get Streamlit script run context")
     
     # Shared progress dictionary for threads
     progress_dict = {i: 0.0 for i in range(len(rois))}
@@ -267,7 +235,7 @@ def generate_audio_proxy(input_path: str, output_path: str, overwrite: bool = Fa
         if os.path.exists(output_path) and not overwrite:
             return True
             
-        print(f"Generating audio proxy for {input_path} -> {output_path}")
+        logger.info(f"Generating audio proxy for {input_path} -> {output_path}")
         
         # Check for audio stream first
         if has_audio_stream(input_path):
@@ -301,13 +269,13 @@ def generate_audio_proxy(input_path: str, output_path: str, overwrite: bool = Fa
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         if result.returncode != 0:
-            print(f"FFmpeg Error: {result.stderr}")
+            logger.error(f"FFmpeg Error: {result.stderr}")
             return False
             
         return True
         
     except Exception as e:
-        print(f"Error generating audio proxy: {e}")
+        logger.error(f"Error generating audio proxy: {e}")
         return False
 
 def generate_video_proxy(input_path: str, output_path: str, height: int = 720, crf: int = 26, progress_callback: Optional[Callable[[float], None]] = None, overwrite: bool = False) -> bool:
@@ -333,7 +301,7 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
             if progress_callback: progress_callback(1.0)
             return True
             
-        print(f"Generating video proxy for {input_path} -> {output_path}")
+        logger.info(f"Generating video proxy for {input_path} -> {output_path}")
 
         # ffmpeg -i input -vf scale=-2:720 -c:v libx264 -crf 26 -preset veryfast -an -movflags +faststart output
         cmd = [
@@ -389,18 +357,18 @@ def generate_video_proxy(input_path: str, output_path: str, height: int = 720, c
             process.wait()
             
             if process.returncode != 0:
-                print(f"FFmpeg Error (Video Proxy): Process returned {process.returncode}")
+                logger.error(f"FFmpeg Error (Video Proxy): Process returned {process.returncode}")
                 return False
             return True
             
         else:
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if result.returncode != 0:
-                print(f"FFmpeg Error (Video Proxy): {result.stderr}")
+                logger.error(f"FFmpeg Error (Video Proxy): {result.stderr}")
                 return False
             return True
 
     except Exception as e:
-        print(f"Error generating video proxy: {e}")
+        logger.error(f"Error generating video proxy: {e}")
         return False
 

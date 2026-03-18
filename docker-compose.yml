@@ -10,7 +10,7 @@ services:
       - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
       - LABEL_STUDIO_USERNAME=user@example.com
       - LABEL_STUDIO_PASSWORD=password123
-      - CSRF_TRUSTED_ORIGINS=http://localhost:8080 http://100.115.151.14:8080 http://100.94.153.78:8080
+      - CSRF_TRUSTED_ORIGINS=http://localhost:8080 http://100.x.y.z:8080
     volumes:
       - ./label-studio_data:/label-studio/data
       - ./workspace/processed:/label-studio/files
@@ -26,7 +26,7 @@ services:
       - LABEL_STUDIO_USERNAME=user@example.com
       - LABEL_STUDIO_PASSWORD=password123
       # Set this to your Tailscale IP (e.g., http://100.x.y.z:8080) for remote access
-      - LABEL_STUDIO_PUBLIC_URL=http://100.115.151.14:8080
+      - LABEL_STUDIO_PUBLIC_URL=http://100.x.y.z:8080
     volumes:
       - ./workspace:/workspace
       - ./src:/app

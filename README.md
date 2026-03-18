@@ -56,7 +56,7 @@ The processor communicates with Label Studio via REST API to create projects, im
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/[ORG_OR_USERNAME]/mouse-behaviour-analysis-tools.git
+   git clone https://github.com/Jackmactaylor/mouse-behaviour-analysis-tools.git
    cd mouse-behaviour-analysis-tools
    ```
 

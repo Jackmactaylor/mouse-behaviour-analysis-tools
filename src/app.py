@@ -5,8 +5,11 @@ import sys
 import cv2
 import glob
 import json
+import logging
 import pandas as pd
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add current directory to path to ensure imports work
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -188,9 +191,9 @@ elif page == "ROI Processing":
                                     "meta": meta,
                                     "rel_path": os.path.relpath(video_path, raw_dir)
                                 })
-                        except:
-                            pass # Skip bad JSONs
-                            
+                        except Exception:
+                            logger.debug(f"Failed to parse JSON sidecar: {final_json_path}")
+
     if not registered_videos:
         st.warning("No registered videos found. Please go to **Ingestion** to register videos first.")
         st.stop()
@@ -330,8 +333,8 @@ elif page == "Labelling Queue":
                                             "rel_path": os.path.relpath(full_vid_path, raw_dir),
                                             "json_dir": root # Tracking where the JSON lives for artifact storage
                                         })
-                        except:
-                            pass
+                        except Exception:
+                            logger.debug(f"Failed to parse JSON sidecar: {json_path}")
 
         if not raw_videos:
             st.info("No registered raw videos found.")
@@ -487,7 +490,7 @@ elif page == "Labelling Queue":
                                             "rel_path": os.path.relpath(video_path, processed_dir)
                                         })
                         except Exception as e:
-                           pass
+                           logger.debug(f"Failed to parse processed video JSON: {e}")
         
         if not found_videos:
             st.info("No processed videos found.")

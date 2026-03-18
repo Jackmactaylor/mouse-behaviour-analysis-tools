@@ -34,11 +34,9 @@ if __name__ == "__main__":
     # Path from task: /workspace/processed/Nov20/Group1_Saline-3/211673_Nov20_Saline-3.mp4
     # But on host (Windows), it is mapped to workspace/processed/...
     
-    # I need to find where the workspace is on the host.
-    # The workspace_info says: c:\Users\tomtaylor\Documents\GitHub\mouse-behaviour-analysis-tools
-    # So workspace is at ./workspace
-    
-    base_dir = r"c:\Users\tomtaylor\Documents\GitHub\mouse-behaviour-analysis-tools\workspace\processed"
+    # Derive base_dir relative to this script's location (tests/ -> ../workspace/processed)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.join(script_dir, "..", "workspace", "processed")
     
     # Recursive search
     found = False

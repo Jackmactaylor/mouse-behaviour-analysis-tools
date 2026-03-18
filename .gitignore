@@ -12,7 +12,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Label Studio export snapshots (working data, not source)
+# Label Studio data
+label-studio_data/.env
+label-studio_data/*.sqlite3
 label-studio_data/export/
 
 # OS files

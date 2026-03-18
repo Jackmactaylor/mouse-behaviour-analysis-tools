@@ -1,8 +1,11 @@
 import os
 import re
 import csv
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Path to the CSV map
 MOUSE_MAP_PATH = "/workspace/mouse_map.csv"
@@ -37,7 +40,7 @@ def load_group_map(csv_path: str = MOUSE_MAP_PATH) -> Dict:
                         ]
                     }
     except Exception as e:
-        print(f"Error loading mouse map: {e}")
+        logger.error(f"Error loading mouse map: {e}")
         return defaults
         
     return group_map if group_map else defaults
